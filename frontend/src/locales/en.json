@@ -1,0 +1,28 @@
+{
+  "common": {
+    "agent_ready": "Agent Ready",
+    "connecting": "Connecting...",
+    "action_required": "Action Required",
+    "resume_button": "I've processed it, continue",
+    "agent_thinking": "Agent is thinking...",
+    "agent_resumed": "Agent resumed execution.",
+    "agent_starting": "Agent starting task: {task}",
+    "executing_action": "Executing action: `{tool}` with args: {args}",
+    "sent_resume": "Sent resume execution command.",
+    "connected_ws": "Connected to NeoFish Agent WebSocket",
+    "task_completed": "✅ **Task Completed**:\n\n{report}",
+    "max_steps_error": "⚠️ Task reached maximum steps without calling finish_task."
+  },
+  "landing": {
+    "hero_title": "What can I do for you?",
+    "input_placeholder": "Send any task, or ask me anything",
+    "suggest_ppt": "Create a presentation",
+    "suggest_analyze": "Analyze web content"
+  },
+  "sidebar": {
+    "explore": "Explore",
+    "chat": "Chat",
+    "gallery": "Gallery",
+    "settings": "Settings"
+  }
+}

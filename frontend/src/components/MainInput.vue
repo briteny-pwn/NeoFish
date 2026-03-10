@@ -20,7 +20,7 @@ function handleSubmit() {
   <div class="flex flex-col items-center justify-center w-full max-w-3xl mx-auto px-4" :class="{ 'h-full': !minimal }">
     <!-- Centered prominent text in serif -->
     <h1 v-if="!minimal" class="font-serif text-4xl md:text-5xl lg:text-6xl text-neutral-800 mb-12 tracking-wide font-medium">
-      我能为你做什么？
+      {{ $t('landing.hero_title') }}
     </h1>
 
     <!-- Floating Input Box -->
@@ -34,7 +34,7 @@ function handleSubmit() {
         @keydown.enter="handleSubmit"
         type="text" 
         class="flex-1 bg-transparent border-none outline-none px-4 py-3 text-lg text-neutral-800 placeholder:text-neutral-400 font-sans"
-        placeholder="发送任何工作任务，或者问我任何问题"
+        :placeholder="$t('landing.input_placeholder')"
       />
       
       <button 
@@ -50,11 +50,11 @@ function handleSubmit() {
     <div v-if="!minimal" class="flex gap-4 mt-8 w-full max-w-2xl px-2">
       <button class="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white/60 hover:bg-white border border-neutral-200/50 text-neutral-600 text-sm font-medium transition-all shadow-sm">
         <FileText :size="16" class="text-orange-400" />
-        制作演示文稿
+        {{ $t('landing.suggest_ppt') }}
       </button>
       <button class="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white/60 hover:bg-white border border-neutral-200/50 text-neutral-600 text-sm font-medium transition-all shadow-sm">
         <Globe :size="16" class="text-blue-400" />
-        分析网页内容
+        {{ $t('landing.suggest_analyze') }}
       </button>
     </div>
   </div>

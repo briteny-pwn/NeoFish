@@ -1,0 +1,28 @@
+{
+  "common": {
+    "agent_ready": "代理就绪",
+    "connecting": "正在连接...",
+    "action_required": "需要您的协助",
+    "resume_button": "我已处理完毕，继续执行",
+    "agent_thinking": "代理正在思考...",
+    "agent_resumed": "代理已恢复执行。",
+    "agent_starting": "代理开始任务：{task}",
+    "executing_action": "正在执行动作：`{tool}`，参数：{args}",
+    "sent_resume": "已发送继续执行指令。",
+    "connected_ws": "已连接到 NeoFish 代理 WebSocket",
+    "task_completed": "✅ **任务已完成**：\n\n{report}",
+    "max_steps_error": "⚠️ 任务达到最大步数，未调用 finish_task。"
+  },
+  "landing": {
+    "hero_title": "我能为你做什么？",
+    "input_placeholder": "发送任何工作任务，或者问我任何问题",
+    "suggest_ppt": "制作演示文稿",
+    "suggest_analyze": "分析网页内容"
+  },
+  "sidebar": {
+    "explore": "探索",
+    "chat": "对话",
+    "gallery": "图库",
+    "settings": "设置"
+  }
+}

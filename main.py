@@ -39,7 +39,11 @@ def read_root():
 @app.websocket("/ws/agent")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    await websocket.send_text(json.dumps({"type": "info", "message": "Connected to NeoFish Agent WebSocket"}))
+    await websocket.send_text(json.dumps({
+        "type": "info", 
+        "message": "Connected to NeoFish Agent WebSocket",
+        "message_key": "common.connected_ws"
+    }))
     
     # Callback to send action required to frontend
     async def request_human_action(reason: str, b64_image: str):
@@ -59,7 +63,11 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if msg_type == "resume":
                 pm.resume_from_human()
-                await websocket.send_text(json.dumps({"type": "info", "message": "Agent resumed execution."}))
+                await websocket.send_text(json.dumps({
+                    "type": "info", 
+                    "message": "Agent resumed execution.",
+                    "message_key": "common.agent_resumed"
+                }))
             
             elif msg_type == "user_input":
                 # Start the agent loop in background to not block WS receive loop

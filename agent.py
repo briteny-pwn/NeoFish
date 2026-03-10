@@ -90,7 +90,11 @@ TOOLS = [
 ]
 
 async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_msg, ws_request_action):
-    await ws_send_msg(f"Agent starting task: {user_instruction}")
+    await ws_send_msg({
+        "message": f"Agent starting task: {user_instruction}",
+        "message_key": "common.agent_starting",
+        "params": {"task": user_instruction}
+    })
     
     messages = []
     max_steps = 15
@@ -119,7 +123,10 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
         messages.append({"role": "user", "content": user_content})
         
         # 2. Think
-        await ws_send_msg("Agent is thinking...")
+        await ws_send_msg({
+            "message": "Agent is thinking...",
+            "message_key": "common.agent_thinking"
+        })
         try:
             response = await client.messages.create(
                 model=model_name,
@@ -154,7 +161,11 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
             args = tool.input
             result_str = ""
             
-            await ws_send_msg(f"Executing action: `{tool_name}` with args: {json.dumps(args, ensure_ascii=False)}")
+            await ws_send_msg({
+                "message": f"Executing action: `{tool_name}` with args: {json.dumps(args, ensure_ascii=False)}",
+                "message_key": "common.executing_action",
+                "params": {"tool": tool_name, "args": json.dumps(args, ensure_ascii=False)}
+            })
             
             try:
                 if tool_name == "navigate":
@@ -190,7 +201,11 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
                     
                 elif tool_name == "finish_task":
                     report = args.get("report", "Task completed.")
-                    await ws_send_msg(f"✅ **Task Completed**:\n\n{report}")
+                    await ws_send_msg({
+                        "message": f"✅ **Task Completed**:\n\n{report}",
+                        "message_key": "common.task_completed",
+                        "params": {"report": report}
+                    })
                     result_str = "Finished."
                     is_finished = True
                 else:
@@ -209,4 +224,7 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
             break
 
     if not is_finished:
-        await ws_send_msg("⚠️ Task reached maximum steps without calling finish_task.")
+        await ws_send_msg({
+            "message": "⚠️ Task reached maximum steps without calling finish_task.",
+            "message_key": "common.max_steps_error"
+        })

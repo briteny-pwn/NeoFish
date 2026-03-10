@@ -79,7 +79,7 @@ function resumeAgent() {
       <header class="absolute top-0 left-0 w-full p-6 flex justify-end z-10 pointer-events-none">
         <div class="flex items-center gap-2 bg-white/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-neutral-200/50 shadow-sm">
           <div class="w-2 h-2 rounded-full" :class="isConnected ? 'bg-green-500' : 'bg-red-500'"></div>
-          <span class="text-xs font-medium text-neutral-600">{{ isConnected ? 'Agent Ready' : 'Connecting...' }}</span>
+          <span class="text-xs font-medium text-neutral-600">{{ isConnected ? $t('common.agent_ready') : $t('common.connecting') }}</span>
         </div>
       </header>
       
@@ -101,7 +101,7 @@ function resumeAgent() {
                 <span class="text-white text-[10px] font-bold">AI</span>
               </div>
               <div class="text-[15px] leading-relaxed text-neutral-700 font-serif">
-                {{ msg.message }}
+                {{ msg.type === 'info' && msg.message === 'Connected to NeoFish Agent WebSocket' ? $t('common.connected_ws') : (msg.message_key ? $t(msg.message_key, msg.params || {}) : msg.message) }}
               </div>
             </div>
 
@@ -111,14 +111,14 @@ function resumeAgent() {
                   <span class="text-white text-[12px] font-bold">!</span>
                 </div>
                 <div class="text-[15px] leading-relaxed text-neutral-800 font-medium pt-0.5">
-                  需要您的协助：{{ msg.reason }}
+                  {{ $t('common.action_required') }}：{{ msg.reason }}
                 </div>
               </div>
               <div v-if="msg.image" class="mt-2 rounded-xl overflow-hidden border border-neutral-200/60 shadow-sm bg-neutral-50/50 p-2">
                 <img :src="'data:image/jpeg;base64,' + msg.image" class="w-full h-auto object-contain max-h-[400px] rounded-lg" alt="Action Required" />
               </div>
               <button @click="resumeAgent" class="mt-3 px-6 py-2.5 bg-neutral-900 text-white rounded-xl hover:bg-neutral-800 transition-all self-start font-medium text-sm shadow-md active:scale-95">
-                我已处理完毕，继续执行
+                {{ $t('common.resume_button') }}
               </button>
             </div>
           </div>
