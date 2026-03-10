@@ -1,10 +1,16 @@
 import os
 import json
 import asyncio
+from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
 from playwright_manager import PlaywrightManager
 
-client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+load_dotenv()
+
+client = AsyncAnthropic(
+    api_key=os.getenv("ANTHROPIC_API_KEY"),
+    base_url=os.getenv("ANTHROPIC_BASE_URL")
+)
 model_name = os.getenv("MODEL_NAME", "claude-3-7-sonnet-20250219")
 
 SYSTEM_PROMPT = """You are NeoFish, an autonomous web browser agent.

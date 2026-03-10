@@ -1,14 +1,14 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import json
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 
 from playwright_manager import PlaywrightManager
 from agent import run_agent_loop
-
-load_dotenv()
 
 pm = PlaywrightManager()
 

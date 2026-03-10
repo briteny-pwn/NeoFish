@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import MainInput from './components/MainInput.vue'
 
@@ -8,6 +8,19 @@ const ws = ref<WebSocket | null>(null)
 const messages = ref<any[]>([])
 const isConnected = ref(false)
 const hasStarted = ref(false)
+const scrollContainer = ref<HTMLElement | null>(null)
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (scrollContainer.value) {
+      scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight
+    }
+  })
+}
+
+watch(messages, () => {
+  scrollToBottom()
+}, { deep: true })
 
 function connectWs() {
   ws.value = new WebSocket('ws://localhost:8000/ws/agent')
@@ -74,9 +87,9 @@ function resumeAgent() {
         <MainInput @submit="handleUserSubmit" />
       </div>
 
-      <div v-else class="flex-1 flex flex-col max-w-4xl mx-auto w-full pt-20 pb-6 px-4">
+      <div v-else class="flex-1 flex flex-col max-w-4xl mx-auto w-full pt-20 pb-6 px-4 min-h-0">
         <!-- Chat history stream -->
-        <div class="flex-1 overflow-y-auto space-y-6 pb-20 custom-scrollbar pr-4">
+        <div ref="scrollContainer" class="flex-1 overflow-y-auto space-y-6 pb-20 custom-scrollbar pr-4">
           <div v-for="(msg, idx) in messages" :key="idx" 
                class="p-4 rounded-2xl max-w-[85%] animate-fade-in-up"
                :class="msg.type === 'user' ? 'bg-neutral-100 text-neutral-800 ml-auto rounded-tr-sm' : 'bg-white border border-neutral-100 shadow-sm mr-auto rounded-tl-sm'">
