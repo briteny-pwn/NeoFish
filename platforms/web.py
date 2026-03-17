@@ -310,6 +310,7 @@ class WebAdapter(PlatformAdapter):
     async def _handle_user_input(self, payload: dict) -> None:
         user_msg: str = payload.get("message", "")
         user_images: list = payload.get("images", [])
+        user_files: list = payload.get("files", [])
 
         # If agent is already running for this session, queue the message
         if self._session_id in _web_running:
@@ -318,6 +319,7 @@ class WebAdapter(PlatformAdapter):
             await _web_queues[self._session_id].put({
                 "text": user_msg,
                 "images": user_images,
+                "files": user_files,
             })
             # Inform the user
             await self._ws.send_text(json.dumps({
@@ -340,18 +342,38 @@ class WebAdapter(PlatformAdapter):
                 filepath.write_bytes(base64.b64decode(b64_data))
                 saved_paths.append(str(filepath))
             except Exception as e:
-                print(f"Failed to save uploaded image: {e}")
+                logger.warning("Failed to save uploaded image: %s", e)
+
+        # Save uploaded files to workspace
+        for file_data in user_files:
+            try:
+                filename = file_data.get("name", "upload")
+                data_url = file_data.get("data", "")
+                if not data_url:
+                    continue
+
+                header, b64_data = data_url.split(",", 1)
+                # Use original filename with timestamp prefix
+                safe_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+                filepath = self._uploads_dir / safe_name
+                filepath.write_bytes(base64.b64decode(b64_data))
+                saved_paths.append(str(filepath))
+                logger.info("Saved uploaded file: %s", filepath)
+            except Exception as e:
+                logger.warning("Failed to save uploaded file %s: %s", file_data.get("name"), e)
 
         self._append_message("user", user_msg, images=user_images)
 
         # Dispatch to on_message callback if set (allows external orchestration)
         if self.on_message is not None:
+            attachments = [(f"image_{i}", du) for i, du in enumerate(user_images)]
+            attachments.extend((f.get("name", f"file_{i}"), f.get("data", "")) for i, f in enumerate(user_files))
             unified = UnifiedMessage(
                 platform="web",
                 user_id="web_user",
                 session_id=self._session_id,
                 text=user_msg,
-                attachments=[(f"image_{i}", du) for i, du in enumerate(user_images)],
+                attachments=attachments,
             )
             await self.on_message(unified)
 

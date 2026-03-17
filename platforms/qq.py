@@ -30,6 +30,7 @@ Usage::
 import asyncio
 import json
 import logging
+import os
 from typing import List, Optional, Dict
 
 try:
@@ -185,30 +186,38 @@ class QQAdapter(PlatformAdapter):
         file_path: str,
         description: str = "",
     ) -> None:
-        """Send a file to the QQ user."""
+        """Send a file to the QQ user.
+
+        Uses upload_private_file or upload_group_file API for NapCat/OneBot v11.
+        Note: The file:// URL format is not supported; we use the absolute path directly.
+        """
         target = self._session_store.get_chat_id("qq", session_id)
         if target is None:
             logger.warning("send_file: no QQ chat mapped to session %s", session_id)
             return
 
         msg_type, chat_id = _parse_target(target)
-        messages: list = []
 
+        # Send description as a separate message first if provided
         if description:
-            messages.append({"type": "text", "data": {"text": description}})
+            await self.send_message(session_id, description)
 
-        # OneBot v11 file segment - using file:// URL
-        # NapCat supports sending files via URL or base64
-        messages.append({
-            "type": "file",
-            "data": {"file": f"file://{file_path}"}
-        })
+        # OneBot v11 uses separate APIs for file upload
+        # NapCat accepts absolute file paths directly
+        abs_path = os.path.abspath(file_path)
 
-        await self._call_api("send_msg", {
-            "message_type": msg_type,
-            "group_id" if msg_type == _MSG_TYPE_GROUP else "user_id": int(chat_id),
-            "message": messages,
-        })
+        if msg_type == _MSG_TYPE_GROUP:
+            await self._call_api("upload_group_file", {
+                "group_id": int(chat_id),
+                "file": abs_path,
+                "name": os.path.basename(abs_path),
+            })
+        else:
+            await self._call_api("upload_private_file", {
+                "user_id": int(chat_id),
+                "file": abs_path,
+                "name": os.path.basename(abs_path),
+            })
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

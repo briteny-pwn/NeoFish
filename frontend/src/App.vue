@@ -148,14 +148,14 @@ async function handleNewChat() {
 }
 
 // ─── User submit ───────────────────────────────────────────────────────────
-function handleUserSubmit(payload: { text: string; images: string[] }) {
-  const { text, images } = payload
+function handleUserSubmit(payload: { text: string; images: string[]; files: { name: string; data: string; type: string }[] }) {
+  const { text, images, files } = payload
   hasStarted.value = true
-  pushMessage({ type: 'user', message: text, images })
+  pushMessage({ type: 'user', message: text, images, files })
   // Always scroll to bottom when user sends a message
   scrollToBottom()
   if (ws.value && isConnected.value) {
-    ws.value.send(JSON.stringify({ type: 'user_input', message: text, images }))
+    ws.value.send(JSON.stringify({ type: 'user_input', message: text, images, files }))
   }
   // Update title of session in sidebar to first message
   const sid = activeChatId.value
@@ -272,6 +272,16 @@ onUnmounted(() => {
                   alt="attached image"
                 />
               </div>
+              <!-- Attached files -->
+              <div v-if="msg.files && msg.files.length > 0" class="flex flex-wrap gap-2">
+                <div
+                  v-for="(file, i) in msg.files"
+                  :key="i"
+                  class="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-neutral-200/60 shadow-sm"
+                >
+                  <span class="text-xs font-medium text-neutral-700 truncate max-w-32">{{ file.name }}</span>
+                </div>
+              </div>
               <div v-if="msg.message" class="text-[15px] leading-relaxed">{{ msg.message }}</div>
             </div>
             
@@ -322,6 +332,31 @@ onUnmounted(() => {
               <div class="mt-1 rounded-xl overflow-hidden border border-neutral-200/60 shadow-sm bg-neutral-50/50 p-2">
                 <img :src="'data:image/jpeg;base64,' + msg.image" class="w-full h-auto object-contain max-h-[400px] rounded-lg" alt="Screenshot" />
               </div>
+            </div>
+
+            <!-- File message from agent -->
+            <div v-else-if="msg.type === 'file'" class="flex flex-col gap-3 w-full">
+              <div class="flex gap-3">
+                <div class="w-6 h-6 rounded-full bg-neutral-900 flex-shrink-0 flex items-center justify-center">
+                  <span class="text-white text-[10px] font-bold">AI</span>
+                </div>
+                <div class="text-[15px] leading-relaxed text-neutral-700 font-serif">{{ msg.description || $t('common.file_sent') }}</div>
+              </div>
+              <a
+                :href="'data:' + msg.mime_type + ';base64,' + msg.data"
+                :download="msg.filename"
+                class="inline-flex items-center gap-3 px-4 py-3 bg-neutral-50 hover:bg-neutral-100 rounded-xl border border-neutral-200/60 shadow-sm transition-colors max-w-xs"
+              >
+                <div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <div class="flex flex-col overflow-hidden">
+                  <span class="text-sm font-medium text-neutral-800 truncate">{{ msg.filename }}</span>
+                  <span class="text-xs text-neutral-500">{{ $t('common.click_to_download') }}</span>
+                </div>
+              </a>
             </div>
 
             <div v-else-if="msg.type === 'action_required'" class="flex flex-col gap-4 w-full">

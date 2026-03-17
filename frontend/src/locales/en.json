@@ -21,7 +21,9 @@
     "task_completed": "✅ **Task Completed**:\n\n{report}",
     "max_steps_error": "⚠️ Task reached maximum steps without calling finish_task.",
     "context_compressing": "Context threshold reached, compressing...",
-    "manual_compressing": "Manual compression triggered..."
+    "manual_compressing": "Manual compression triggered...",
+    "file_sent": "File sent",
+    "click_to_download": "Click to download"
   },
   "landing": {
     "hero_title": "What can I do for you?",
@@ -46,6 +48,6 @@
     "days_ago": "{n} days ago"
   },
   "input": {
-    "attach_image": "Attach image"
+    "attach_file": "Attach file or image"
   }
 }
