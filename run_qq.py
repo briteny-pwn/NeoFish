@@ -9,7 +9,6 @@ or:
 Required environment variables (set in .env or shell):
     QQ_WS_URL     — WebSocket URL of your NapCat / go-cqhttp instance,
                     e.g. ws://127.0.0.1:3001
-    QQ_API_URL    — HTTP API base URL, e.g. http://127.0.0.1:3000
     ANTHROPIC_API_KEY — Anthropic API key for the agent
 
 Optional:
@@ -19,9 +18,8 @@ Optional:
 
 NapCat quick setup:
     1. Install NapCat and sign in.
-    2. Enable the HTTP API plugin on port 3000.
-    3. Enable the Forward WebSocket plugin on port 3001.
-    4. Set QQ_WS_URL=ws://127.0.0.1:3001 and QQ_API_URL=http://127.0.0.1:3000.
+    2. Enable the Forward WebSocket plugin on port 3001.
+    3. Set QQ_WS_URL=ws://127.0.0.1:3001 in your .env.
 """
 
 import asyncio

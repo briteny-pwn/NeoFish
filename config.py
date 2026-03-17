@@ -48,16 +48,12 @@ TELEGRAM_ALLOWED_USERS: list[str] = (
 
 # ── QQ platform ───────────────────────────────────────────────────────────────
 
-# Base URL for the NapCat / go-cqhttp HTTP API.
-# Example: QQ_API_URL=http://127.0.0.1:3000
-QQ_API_URL: str = os.getenv("QQ_API_URL", "http://127.0.0.1:3000")
+# WebSocket URL for NapCat / go-cqhttp (events and API calls).
+# Example: QQ_WS_URL=ws://127.0.0.1:3001
+QQ_WS_URL: str = os.getenv("QQ_WS_URL", "")
 
 # Access token for NapCat / go-cqhttp (leave empty if not configured).
 QQ_ACCESS_TOKEN: str = os.getenv("QQ_ACCESS_TOKEN", "")
-
-# WebSocket URL that NapCat / go-cqhttp pushes events to.
-# Example: QQ_WS_URL=ws://127.0.0.1:3001
-QQ_WS_URL: str = os.getenv("QQ_WS_URL", "ws://127.0.0.1:3001")
 
 # Comma-separated list of allowed QQ user / group IDs (empty = allow everyone).
 _qq_allowed_raw: str = os.getenv("QQ_ALLOWED_IDS", "")

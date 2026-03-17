@@ -3,6 +3,7 @@ reference/
 .vscode/
 .env
 sessions.json
+platform_sessions.json
 browser_state/
 .tasks/
 .transcripts/

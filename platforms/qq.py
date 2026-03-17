@@ -2,21 +2,18 @@
 platforms/qq.py - QQ platform adapter for NeoFish.
 
 Connects to a NapCat / go-cqhttp instance via its forward WebSocket
-(onebot v11 event bus) and HTTP API for sending messages.
+(onebot v11 event bus). All API calls go through WebSocket.
 
 Configuration (via .env or environment variables):
-    QQ_WS_URL         — WebSocket URL to receive events,
+    QQ_WS_URL         — WebSocket URL for events and API calls,
                         e.g. ws://127.0.0.1:3001  (required)
-    QQ_API_URL        — HTTP API base URL for outgoing calls,
-                        e.g. http://127.0.0.1:3000  (required)
     QQ_ACCESS_TOKEN   — Access token (optional, depends on NapCat config)
     QQ_ALLOWED_IDS    — Comma-separated user/group IDs to accept (optional)
 
 NapCat setup (quick start):
     1. Install NapCat and log in with your QQ account.
-    2. Enable the "HTTP API" plugin on port 3000.
-    3. Enable the "正向 WebSocket" (forward WebSocket) plugin on port 3001.
-    4. Set QQ_WS_URL and QQ_API_URL in your .env.
+    2. Enable the "正向 WebSocket" (forward WebSocket) plugin on port 3001.
+    3. Set QQ_WS_URL in your .env.
 
 Usage::
 
@@ -33,7 +30,7 @@ Usage::
 import asyncio
 import json
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 try:
     import aiohttp
@@ -41,7 +38,7 @@ try:
 except ImportError:
     _AIOHTTP_AVAILABLE = False
 
-from config import QQ_API_URL, QQ_ACCESS_TOKEN, QQ_WS_URL, QQ_ALLOWED_IDS
+from config import QQ_ACCESS_TOKEN, QQ_WS_URL, QQ_ALLOWED_IDS
 from message import UnifiedMessage
 from platforms.base import PlatformAdapter
 from session import SessionStore
@@ -58,17 +55,15 @@ class QQAdapter(PlatformAdapter):
     Platform adapter for QQ via NapCat / go-cqhttp (OneBot v11).
 
     Listens for events on the OneBot WebSocket and forwards incoming messages
-    to ``self.on_message`` as ``UnifiedMessage`` objects.  Replies are sent
-    via the HTTP API.
+    to ``self.on_message`` as ``UnifiedMessage`` objects. Replies are sent
+    via WebSocket API calls.
 
     Parameters
     ----------
     session_store:
         ``SessionStore`` instance for mapping QQ chats to unified sessions.
     ws_url:
-        WebSocket URL for the OneBot event bus.
-    api_url:
-        HTTP API base URL for sending messages.
+        WebSocket URL for the OneBot event bus and API calls.
     access_token:
         Optional access token for NapCat / go-cqhttp authentication.
     allowed_ids:
@@ -80,20 +75,20 @@ class QQAdapter(PlatformAdapter):
         self,
         session_store: SessionStore,
         ws_url: Optional[str] = None,
-        api_url: Optional[str] = None,
         access_token: Optional[str] = None,
         allowed_ids: Optional[List[str]] = None,
     ) -> None:
         super().__init__()
         self._ws_url = ws_url or QQ_WS_URL
-        self._api_url = (api_url or QQ_API_URL).rstrip("/")
         self._access_token = access_token or QQ_ACCESS_TOKEN
         self._allowed = set(allowed_ids) if allowed_ids else set(QQ_ALLOWED_IDS)
         self._session_store = session_store
         self._running = False
         self._ws = None          # aiohttp ClientWebSocketResponse
-        self._http: Optional[object] = None  # aiohttp ClientSession
+        self._session: Optional[aiohttp.ClientSession] = None
         self._task: Optional[asyncio.Task] = None
+        self._echo_counter = 0   # For WS API call correlation
+        self._pending_calls: Dict[str, asyncio.Future] = {}  # echo -> Future
 
     # ── PlatformAdapter interface ─────────────────────────────────────────────
 
@@ -111,12 +106,8 @@ class QQAdapter(PlatformAdapter):
             )
 
         self._running = True
-        headers = {}
-        if self._access_token:
-            headers["Authorization"] = f"Bearer {self._access_token}"
-
-        self._http = aiohttp.ClientSession(headers=headers)
         logger.info("Starting QQ adapter, connecting to %s…", self._ws_url)
+        self._session = aiohttp.ClientSession()
         self._task = asyncio.create_task(self._listen_loop())
 
     async def stop(self) -> None:
@@ -130,8 +121,13 @@ class QQAdapter(PlatformAdapter):
                 await self._task
             except asyncio.CancelledError:
                 pass
-        if self._http is not None:
-            await self._http.close()
+        if self._session is not None:
+            await self._session.close()
+        # Cancel any pending API calls
+        for future in self._pending_calls.values():
+            if not future.done():
+                future.cancel()
+        self._pending_calls.clear()
         logger.info("QQ adapter stopped.")
 
     async def send_message(
@@ -193,7 +189,7 @@ class QQAdapter(PlatformAdapter):
 
         while self._running:
             try:
-                async with self._http.ws_connect(self._ws_url, headers=headers) as ws:
+                async with self._session.ws_connect(self._ws_url, headers=headers) as ws:
                     self._ws = ws
                     logger.info("QQ adapter: WebSocket connected to %s", self._ws_url)
                     async for msg in ws:
@@ -212,13 +208,23 @@ class QQAdapter(PlatformAdapter):
                     await asyncio.sleep(5)
 
     async def _dispatch(self, raw: str) -> None:
-        """Parse a raw OneBot event JSON string and call on_message if needed."""
+        """Parse a raw OneBot event JSON string and handle it."""
         try:
             event = json.loads(raw)
         except json.JSONDecodeError:
             logger.warning("QQ adapter: received non-JSON data: %s", raw[:200])
             return
 
+        # Handle API response (for WS-based API calls)
+        if "echo" in event:
+            echo = event["echo"]
+            if echo in self._pending_calls:
+                future = self._pending_calls.pop(echo)
+                if not future.done():
+                    future.set_result(event)
+            return
+
+        # Handle message events
         post_type = event.get("post_type")
         if post_type != "message":
             return  # Ignore meta/notice/request events for now
@@ -274,9 +280,9 @@ class QQAdapter(PlatformAdapter):
         else:
             logger.warning("QQAdapter.on_message is not set; message dropped.")
 
-    async def _call_api(self, action: str, params: dict) -> Optional[dict]:
+    async def _call_api(self, action: str, params: dict, timeout: float = 10.0) -> Optional[dict]:
         """
-        Call a NapCat / go-cqhttp HTTP API endpoint.
+        Call a OneBot v11 API via WebSocket.
 
         Parameters
         ----------
@@ -284,20 +290,40 @@ class QQAdapter(PlatformAdapter):
             OneBot v11 action name, e.g. ``"send_msg"``.
         params:
             Action parameters dict.
+        timeout:
+            Seconds to wait for response.
 
         Returns
         -------
-        The parsed JSON response, or *None* on error.
+        The parsed JSON response, or *None* on error/timeout.
         """
-        url = f"{self._api_url}/{action}"
-        headers = {"Content-Type": "application/json"}
-        if self._access_token:
-            headers["Authorization"] = f"Bearer {self._access_token}"
+        if self._ws is None:
+            logger.warning("QQ API call failed: WebSocket not connected")
+            return None
+
+        self._echo_counter += 1
+        echo = str(self._echo_counter)
+
+        payload = {
+            "action": action,
+            "params": params,
+            "echo": echo,
+        }
+
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
+        self._pending_calls[echo] = future
 
         try:
-            async with self._http.post(url, json=params, headers=headers) as resp:
-                return await resp.json()
+            await self._ws.send_str(json.dumps(payload))
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result
+        except asyncio.TimeoutError:
+            self._pending_calls.pop(echo, None)
+            logger.warning("QQ API call timed out: %s", action)
+            return None
         except Exception as exc:
+            self._pending_calls.pop(echo, None)
             logger.error("QQ API call failed (%s): %s", action, exc)
             return None
 
