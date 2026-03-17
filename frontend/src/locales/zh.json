@@ -19,7 +19,9 @@
     "sent_resume": "已发送继续执行指令。",
     "connected_ws": "已连接到 NeoFish 代理 WebSocket",
     "task_completed": "✅ **任务已完成**：\n\n{report}",
-    "max_steps_error": "⚠️ 任务达到最大步数，未调用 finish_task。"
+    "max_steps_error": "⚠️ 任务达到最大步数，未调用 finish_task。",
+    "context_compressing": "上下文达到阈值，正在压缩...",
+    "manual_compressing": "手动压缩已触发..."
   },
   "landing": {
     "hero_title": "我能为你做什么？",

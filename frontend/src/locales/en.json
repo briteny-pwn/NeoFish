@@ -19,7 +19,9 @@
     "sent_resume": "Sent resume execution command.",
     "connected_ws": "Connected to NeoFish Agent WebSocket",
     "task_completed": "✅ **Task Completed**:\n\n{report}",
-    "max_steps_error": "⚠️ Task reached maximum steps without calling finish_task."
+    "max_steps_error": "⚠️ Task reached maximum steps without calling finish_task.",
+    "context_compressing": "Context threshold reached, compressing...",
+    "manual_compressing": "Manual compression triggered..."
   },
   "landing": {
     "hero_title": "What can I do for you?",

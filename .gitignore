@@ -4,7 +4,9 @@ reference/
 .env
 sessions.json
 browser_state/
-
+.tasks/
+.transcripts/
+workspace/
 # Vue
 node_modules/
 frontend/node_modules/

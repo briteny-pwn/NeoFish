@@ -1,9 +1,14 @@
 import os
 import json
 import asyncio
+import time
+from pathlib import Path
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
 from playwright_manager import PlaywrightManager
+from workspace_manager import WorkspaceManager
+from task_manager import TaskManager
+from background_manager import BackgroundManager
 
 load_dotenv()
 
@@ -13,8 +18,23 @@ client = AsyncAnthropic(
 )
 model_name = os.getenv("MODEL_NAME", "claude-3-7-sonnet-20250219")
 
-SYSTEM_PROMPT = """You are NeoFish, an autonomous web browser agent.
-Your core task is to complete the user's instructions on the web.
+# Configuration
+WORKDIR = Path(os.getenv("WORKDIR", "./workspace")).resolve()
+TOKEN_THRESHOLD = int(os.getenv("TOKEN_THRESHOLD", "800000"))
+MAX_TOKEN = int(os.getenv("MAX_TOKEN", "1000000"))
+TRANSCRIPT_DIR = Path(os.getenv("TRANSCRIPT_DIR", "./.transcripts")).resolve()
+KEEP_RECENT = 3  # For microcompact
+
+# Initialize managers
+workspace = WorkspaceManager(WORKDIR, strict=False)
+task_manager = TaskManager()
+background_manager = BackgroundManager(WORKDIR)
+
+SYSTEM_PROMPT = """You are NeoFish, an autonomous agent that can:
+1. **Browse the web** - Navigate, click, type, extract information
+2. **Manage files** - Read, write, edit files in the workspace
+3. **Execute commands** - Run shell commands (blocking or background)
+4. **Track tasks** - Create, update, and manage persistent tasks
 
 ## Observing the page
 You have two complementary ways to observe the current state of the page:
@@ -33,11 +53,31 @@ You have two complementary ways to observe the current state of the page:
   more reliable than brittle CSS selectors.
 - Only fall back to a CSS/XPath `selector` when no suitable ref is available.
 
+## File Operations
+- Use `read_file` to read file contents
+- Use `write_file` to create or overwrite files
+- Use `edit_file` to make precise changes to existing files
+- Use `run_bash` to execute shell commands (blocking, with timeout)
+- Use `background_run` for long-running commands (non-blocking)
+
+## Task Management
+Tasks persist across context compression. Use them to track progress on complex tasks:
+- `task_create` - Create a new task with subject and description
+- `task_list` - List all tasks with their status
+- `task_get` - Get full details of a specific task
+- `task_update` - Update task status or dependencies
+
+## Background Tasks
+For commands that take a long time:
+- `background_run` - Start a background command, returns task_id immediately
+- `check_background` - Check status of background tasks
+
 If you ever encounter a strict login wall, CAPTCHA, or require the user to scan a QR code, you must call the `request_human_assistance` tool. Do NOT give up easily; only ask for help when absolutely necessary.
 When the task is completely finished, call `finish_task`.
 """
 
 TOOLS = [
+    # Browser tools
     {
         "name": "snapshot",
         "description": (
@@ -150,23 +190,265 @@ TOOLS = [
             "properties": {"report": {"type": "string", "description": "Markdown formatted summary"}},
             "required": ["report"]
         }
+    },
+    # File operation tools
+    {
+        "name": "read_file",
+        "description": "Read the contents of a file. Path can be relative to workspace or absolute.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to read"},
+                "limit": {"type": "integer", "description": "Maximum number of lines to read (optional)"}
+            },
+            "required": ["path"]
+        }
+    },
+    {
+        "name": "write_file",
+        "description": "Write content to a file. Creates parent directories if needed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to write"},
+                "content": {"type": "string", "description": "Content to write to the file"}
+            },
+            "required": ["path", "content"]
+        }
+    },
+    {
+        "name": "edit_file",
+        "description": "Replace exact text in a file. Only replaces the first occurrence.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to edit"},
+                "old_text": {"type": "string", "description": "Text to find and replace"},
+                "new_text": {"type": "string", "description": "Replacement text"}
+            },
+            "required": ["path", "old_text", "new_text"]
+        }
+    },
+    {
+        "name": "run_bash",
+        "description": "Execute a shell command. Blocks until completion with timeout (default 120s). Dangerous commands are blocked.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Shell command to execute"},
+                "timeout": {"type": "integer", "description": "Timeout in seconds (default 120)"}
+            },
+            "required": ["command"]
+        }
+    },
+    # Task management tools
+    {
+        "name": "task_create",
+        "description": "Create a new task that persists across context compression.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "description": "Brief task title"},
+                "description": {"type": "string", "description": "Detailed task description (optional)"}
+            },
+            "required": ["subject"]
+        }
+    },
+    {
+        "name": "task_get",
+        "description": "Get full details of a task by ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "integer"}},
+            "required": ["task_id"]
+        }
+    },
+    {
+        "name": "task_update",
+        "description": "Update a task's status or dependencies.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer"},
+                "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
+                "addBlockedBy": {"type": "array", "items": {"type": "integer"}, "description": "Task IDs this task depends on"},
+                "addBlocks": {"type": "array", "items": {"type": "integer"}, "description": "Task IDs that depend on this task"}
+            },
+            "required": ["task_id"]
+        }
+    },
+    {
+        "name": "task_list",
+        "description": "List all tasks with their status.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    # Background task tools
+    {
+        "name": "background_run",
+        "description": "Run a command in the background. Returns immediately with a task_id. Results will be delivered in next turn.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Shell command to run in background"},
+                "timeout": {"type": "integer", "description": "Timeout in seconds (default 300)"}
+            },
+            "required": ["command"]
+        }
+    },
+    {
+        "name": "check_background",
+        "description": "Check status of background tasks. Omit task_id to list all.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "string", "description": "Specific task ID (optional)"}},
+            "required": []
+        }
+    },
+    # Context management
+    {
+        "name": "compact",
+        "description": "Trigger manual context compression. Use when conversation is getting too long.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "focus": {"type": "string", "description": "What to preserve in the summary"}
+            },
+            "required": []
+        }
     }
 ]
 
-async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_msg, ws_request_action, ws_send_image, images: list = [], history_messages: list = []):
+
+# ============== Context Compression Functions ==============
+
+def estimate_tokens(messages: list) -> int:
+    """Rough token count estimation: ~4 chars per token."""
+    return len(str(messages)) // 4
+
+
+def microcompact(messages: list) -> list:
+    """
+    Layer 1: Replace old tool_result content with placeholders.
+    Keeps only the last KEEP_RECENT tool results intact.
+    """
+    # Collect all tool_result entries
+    tool_results = []
+    for msg_idx, msg in enumerate(messages):
+        if msg["role"] == "user" and isinstance(msg.get("content"), list):
+            for part_idx, part in enumerate(msg["content"]):
+                if isinstance(part, dict) and part.get("type") == "tool_result":
+                    tool_results.append((msg_idx, part_idx, part))
+
+    if len(tool_results) <= KEEP_RECENT:
+        return messages
+
+    # Build tool_name map from assistant messages
+    tool_name_map = {}
+    for msg in messages:
+        if msg["role"] == "assistant":
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if hasattr(block, "type") and block.type == "tool_use":
+                        tool_name_map[block.id] = block.name
+                    elif isinstance(block, dict) and block.get("type") == "tool_use":
+                        tool_name_map[block.get("id", "")] = block.get("name", "unknown")
+
+    # Clear old results (keep last KEEP_RECENT)
+    to_clear = tool_results[:-KEEP_RECENT]
+    for _, _, result in to_clear:
+        if isinstance(result.get("content"), str) and len(result["content"]) > 100:
+            tool_id = result.get("tool_use_id", "")
+            tool_name = tool_name_map.get(tool_id, "unknown")
+            result["content"] = f"[Previous: used {tool_name}]"
+
+    return messages
+
+
+async def auto_compact(messages: list, focus: str = None) -> list:
+    """
+    Layer 2: Save transcript, summarize with LLM, replace messages.
+    """
+    # Ensure transcript directory exists
+    TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Save full transcript
+    timestamp = int(time.time())
+    transcript_path = TRANSCRIPT_DIR / f"transcript_{timestamp}.jsonl"
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        for msg in messages:
+            f.write(json.dumps(msg, default=str, ensure_ascii=False) + "\n")
+
+    # Build summary prompt
+    conversation_text = json.dumps(messages, default=str, ensure_ascii=False)[:80000]
+    focus_text = f"\n\nFocus on preserving: {focus}" if focus else ""
+
+    summary_prompt = (
+        "Summarize this conversation for continuity. Include:\n"
+        "1) What was accomplished\n"
+        "2) Current state and pending tasks\n"
+        "3) Key decisions and important context\n"
+        "Be concise but preserve critical details.\n"
+        f"{focus_text}\n\n{conversation_text}"
+    )
+
+    try:
+        response = await client.messages.create(
+            model=model_name,
+            max_tokens=2000,
+            messages=[{"role": "user", "content": summary_prompt}]
+        )
+        # Extract text from response, handling ThinkingBlock etc.
+        text_parts = []
+        for block in response.content:
+            if hasattr(block, "text") and block.type == "text":
+                text_parts.append(block.text)
+        summary = "\n".join(text_parts) if text_parts else "No summary generated."
+    except Exception as e:
+        summary = f"Error generating summary: {str(e)}"
+
+    # Replace all messages with compressed summary
+    return [
+        {
+            "role": "user",
+            "content": (
+                f"[Conversation compressed. Full transcript: {transcript_path}]\n\n"
+                f"{summary}"
+            )
+        },
+        {
+            "role": "assistant",
+            "content": "Understood. I have the context from the summary. Continuing."
+        }
+    ]
+
+
+# ============== Main Agent Loop ==============
+
+async def run_agent_loop(
+    pm: PlaywrightManager,
+    user_instruction: str,
+    ws_send_msg,
+    ws_request_action,
+    ws_send_image,
+    images: list = [],
+    history_messages: list = []
+):
     await ws_send_msg({
         "message": f"Agent starting task: {user_instruction}",
         "message_key": "common.agent_starting",
         "params": {"task": user_instruction}
     })
 
-    messages = history_messages.copy()  # Start with conversation history
+    messages = history_messages.copy()
     max_steps = 100
     is_finished = False
-    
-    # First user message: if user supplied images, present them first with an
-    # explicit label so the model understands these are direct reference images
-    # (not page screenshots) and should be examined before any tool use.
+
+    # First user message: handle images if provided
     if images:
         user_content = [{
             "type": "text",
@@ -179,14 +461,13 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
         for data_url in images:
             try:
                 header, b64_data = data_url.split(",", 1)
-                media_type = header.split(":")[1].split(";")[0]  # e.g. image/png
+                media_type = header.split(":")[1].split(";")[0]
                 user_content.append({
                     "type": "image",
                     "source": {"type": "base64", "media_type": media_type, "data": b64_data}
                 })
             except Exception as e:
                 print(f"Failed to parse image data-URL: {e}")
-        # Remind the model that the images above are user-provided
         user_content.append({
             "type": "text",
             "text": "The images above were provided by the user. Answer based on them directly if the task is about image content. Only browse the web if the task explicitly requires it."
@@ -194,9 +475,8 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
     else:
         user_content = [{"type": "text", "text": f"Please execute this task: {user_instruction}"}]
 
-    
     for step in range(max_steps):
-        # Check if a proactive takeover was requested before this step
+        # Check for proactive takeover request
         if pm.check_and_clear_pause_request():
             await ws_send_msg({
                 "message": "Agent paused for manual takeover. Waiting for you to finish…",
@@ -204,29 +484,53 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
             })
             await pm.human_intervention_event.wait()
 
-        # 1. Observe (Append observation to the pending user_content)
+        # === NEW: Drain background notifications ===
+        bg_notifs = await background_manager.drain_notifications()
+        if bg_notifs:
+            notif_text = background_manager.format_notifications(bg_notifs)
+            messages.append({
+                "role": "user",
+                "content": f"<background-results>\n{notif_text}\n</background-results>"
+            })
+            messages.append({
+                "role": "assistant",
+                "content": "Noted background task results."
+            })
+
+        # === NEW: Microcompact (Layer 1) ===
+        microcompact(messages)
+
+        # === NEW: Auto-compact check (Layer 2) ===
+        if estimate_tokens(messages) > TOKEN_THRESHOLD:
+            await ws_send_msg({
+                "message": "Context threshold reached, compressing...",
+                "message_key": "common.context_compressing"
+            })
+            messages[:] = await auto_compact(messages)
+
+        # 1. Observe - append observation to user_content
         if pm.page:
             try:
                 b64_img = await pm.get_page_screenshot_base64()
                 url = pm.page.url
                 title = await pm.page.title()
-                user_content.append({"type": "text", "text": f"Current URL: {url}\\nTitle: {title}\\nWhat is your next action?"})
+                user_content.append({"type": "text", "text": f"Current URL: {url}\nTitle: {title}\nWhat is your next action?"})
                 if b64_img:
                     user_content.append({
-                        "type": "image", 
+                        "type": "image",
                         "source": {"type": "base64", "media_type": "image/jpeg", "data": b64_img}
                     })
             except Exception as e:
                 user_content.append({"type": "text", "text": f"Observation failed: {e}. Try to continue."})
-        
-        # Add the constructed user message to history
+
         messages.append({"role": "user", "content": user_content})
-        
+
         # 2. Think
         await ws_send_msg({
             "message": "Agent is thinking...",
             "message_key": "common.agent_thinking"
         })
+
         try:
             response = await client.messages.create(
                 model=model_name,
@@ -236,18 +540,15 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
                 tools=TOOLS
             )
         except Exception as e:
-             await ws_send_msg(f"Error calling LLM: {str(e)}")
-             break
-             
-        # Add Assistant Response to history
+            await ws_send_msg(f"Error calling LLM: {str(e)}")
+            break
+
         messages.append({"role": "assistant", "content": response.content})
-        
+
         # 3. Act
         tool_uses = [block for block in response.content if block.type == "tool_use"]
-        
-        # Prepare next user message content starting with tool results
         user_content = []
-        
+
         if not tool_uses:
             text_blocks = [b.text for b in response.content if b.type == "text"]
             if text_blocks:
@@ -255,31 +556,31 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
                 await ws_send_msg("🤔 " + msg)
                 user_content.append({"type": "text", "text": "You didn't call any tools. Please use a tool to proceed."})
             continue
-            
+
+        manual_compact = False
+
         for tool in tool_uses:
             tool_name = tool.name
             args = tool.input
             result_str = ""
-            
+
             await ws_send_msg({
                 "message": f"Executing action: `{tool_name}` with args: {json.dumps(args, ensure_ascii=False)}",
                 "message_key": "common.executing_action",
                 "params": {"tool": tool_name, "args": json.dumps(args, ensure_ascii=False)}
             })
-            
+
             try:
+                # Browser tools
                 if tool_name == "snapshot":
                     snapshot_text = await pm.get_aria_snapshot()
-                    if snapshot_text:
-                        result_str = snapshot_text
-                    else:
-                        result_str = "Could not capture aria snapshot."
+                    result_str = snapshot_text if snapshot_text else "Could not capture aria snapshot."
 
                 elif tool_name == "navigate":
                     await pm.page.goto(args["url"])
                     await asyncio.sleep(2)
                     result_str = "Successfully navigated."
-                    
+
                 elif tool_name == "click":
                     ref = args.get("ref")
                     selector = args.get("selector")
@@ -292,7 +593,7 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
                         raise ValueError("click requires either 'ref' or 'selector'")
                     await asyncio.sleep(1)
                     result_str = "Successfully clicked."
-                    
+
                 elif tool_name == "type_text":
                     ref = args.get("ref")
                     selector = args.get("selector")
@@ -304,7 +605,7 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
                     else:
                         raise ValueError("type_text requires either 'ref' or 'selector'")
                     result_str = "Successfully typed text."
-                    
+
                 elif tool_name == "scroll":
                     direction = args.get("direction", "down")
                     if direction == "down":
@@ -313,12 +614,12 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
                         await pm.page.mouse.wheel(0, -1000)
                     await asyncio.sleep(1)
                     result_str = "Scrolled."
-                    
+
                 elif tool_name == "request_human_assistance":
                     reason = args.get("reason", "Login required.")
                     await pm.block_for_human(ws_request_action, reason)
                     result_str = "Human has processed the request. Page might have updated. You may resume your task."
-                    
+
                 elif tool_name == "extract_info":
                     result_str = f"Extracted: {args['info_summary']}"
 
@@ -340,18 +641,88 @@ async def run_agent_loop(pm: PlaywrightManager, user_instruction: str, ws_send_m
                     })
                     result_str = "Finished."
                     is_finished = True
+
+                # File operation tools
+                elif tool_name == "read_file":
+                    result_str = await workspace.read_file(args["path"], args.get("limit"))
+
+                elif tool_name == "write_file":
+                    result_str = await workspace.write_file(args["path"], args["content"])
+
+                elif tool_name == "edit_file":
+                    result_str = await workspace.edit_file(
+                        args["path"],
+                        args["old_text"],
+                        args["new_text"]
+                    )
+
+                elif tool_name == "run_bash":
+                    result_str = await workspace.run_bash(
+                        args["command"],
+                        args.get("timeout", 120)
+                    )
+
+                # Task management tools
+                elif tool_name == "task_create":
+                    result_str = task_manager.create(
+                        args["subject"],
+                        args.get("description", "")
+                    )
+
+                elif tool_name == "task_get":
+                    result_str = task_manager.get(args["task_id"])
+
+                elif tool_name == "task_update":
+                    result_str = task_manager.update(
+                        args["task_id"],
+                        args.get("status"),
+                        args.get("addBlockedBy"),
+                        args.get("addBlocks")
+                    )
+
+                elif tool_name == "task_list":
+                    result_str = task_manager.list_all()
+
+                # Background task tools
+                elif tool_name == "background_run":
+                    result_str = await background_manager.run(
+                        args["command"],
+                        args.get("timeout")
+                    )
+
+                elif tool_name == "check_background":
+                    result_str = await background_manager.check(args.get("task_id"))
+
+                # Context compression
+                elif tool_name == "compact":
+                    manual_compact = True
+                    focus = args.get("focus")
+                    result_str = f"Manual compression requested{': ' + focus if focus else ''}."
+
                 else:
                     result_str = f"Unknown tool: {tool_name}"
-                    
+
             except Exception as e:
                 result_str = f"Error executing {tool_name}: {str(e)}"
-                
+
             user_content.append({
                 "type": "tool_result",
                 "tool_use_id": tool.id,
                 "content": result_str
             })
-            
+
+        # === NEW: Handle manual compact (Layer 3) ===
+        if manual_compact:
+            await ws_send_msg({
+                "message": "Manual compression triggered...",
+                "message_key": "common.manual_compressing"
+            })
+            focus = None
+            for tool in tool_uses:
+                if tool.name == "compact" and tool.input.get("focus"):
+                    focus = tool.input["focus"]
+            messages[:] = await auto_compact(messages, focus)
+
         if is_finished:
             break
 
