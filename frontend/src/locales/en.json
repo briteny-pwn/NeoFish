@@ -3,11 +3,14 @@
     "agent_ready": "Agent Ready",
     "connecting": "Connecting...",
     "action_required": "Action Required",
+    "action_required_prefix": "Action Required",
     "resume_button": "I've processed it, continue",
     "takeover_button": "Take Control",
     "takeover_done_button": "Done",
     "takeover_started": "Browser embedded — interact directly in the page",
+    "takeover_browser_opened": "Browser opened for manual interaction",
     "takeover_ended": "Takeover ended. AI is resuming…",
+    "takeover_ended_message": "Takeover ended, resuming at: {url}",
     "takeover_already_active": "Takeover is already in progress.",
     "takeover_banner": "Browser embedded — interact directly",
     "proactive_takeover": "Take Over",
@@ -76,5 +79,10 @@
   "status": {
     "thinking": "Thinking...",
     "completed": "Finished thinking"
+  },
+  "thinking": {
+    "process": "Thinking Process",
+    "completed": "Completed · {count} steps",
+    "steps": "steps"
   }
 }

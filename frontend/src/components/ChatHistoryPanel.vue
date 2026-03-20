@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { Plus, Trash2, Pencil, Check, X, MessageSquare } from 'lucide-vue-next'
 import { useChatHistory, type ChatSession } from '../composables/useChatHistory'
 import { useI18n } from 'vue-i18n'

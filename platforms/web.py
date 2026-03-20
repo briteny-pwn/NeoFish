@@ -91,12 +91,16 @@ class WebAdapter(PlatformAdapter):
 
     async def start(self) -> None:
         """Send the initial "connected" info frame to the client."""
-        await self._ws.send_text(json.dumps({
-            "type": "info",
-            "message": "Connected to NeoFish Agent WebSocket",
-            "message_key": "common.connected_ws",
-            "session_id": self._session_id,
-        }))
+        await self._ws.send_text(
+            json.dumps(
+                {
+                    "type": "info",
+                    "message": "Connected to NeoFish Agent WebSocket",
+                    "message_key": "common.connected_ws",
+                    "session_id": self._session_id,
+                }
+            )
+        )
 
     async def stop(self) -> None:
         """No-op: WebSocket lifecycle is managed by FastAPI."""
@@ -187,10 +191,13 @@ class WebAdapter(PlatformAdapter):
         content: str,
         images: list = None,
         image_data: str = "",
+        message_key: str = "",
+        params: dict = None,
     ) -> None:
-        """Append a message to the session store and persist to disk."""
         if images is None:
             images = []
+        if params is None:
+            params = {}
         msg: dict = {
             "role": role,
             "content": content,
@@ -199,8 +206,11 @@ class WebAdapter(PlatformAdapter):
         }
         if image_data:
             msg["image_data"] = image_data
+        if message_key:
+            msg["message_key"] = message_key
+        if params:
+            msg["params"] = params
         self._sessions[self._session_id]["messages"].append(msg)
-        # Auto-title: use the first user message (truncated)
         if role == "user" and not self._sessions[self._session_id]["title"]:
             self._sessions[self._session_id]["title"] = (content or "📷 Image")[:40]
         self._save_sessions()
@@ -213,7 +223,9 @@ class WebAdapter(PlatformAdapter):
             "image": b64_image,
         }
         await self._ws.send_text(json.dumps(payload))
-        self._append_message("assistant", f"[Image] {description}", image_data=b64_image)
+        self._append_message(
+            "assistant", f"[Image] {description}", image_data=b64_image
+        )
 
     def _build_history(self) -> list:
         """Build the conversation history list for the agent (excludes last msg)."""
@@ -223,12 +235,14 @@ class WebAdapter(PlatformAdapter):
             role = m.get("role", "user")
             content = m.get("content", "")
             if role == "user":
-                history.append({"role": "user", "content": content or "(user sent an image)"})
+                history.append(
+                    {"role": "user", "content": content or "(user sent an image)"}
+                )
             else:
                 clean = content
                 for prefix in _ASSISTANT_MSG_PREFIXES:
                     if clean.startswith(prefix):
-                        clean = clean[len(prefix):]
+                        clean = clean[len(prefix) :]
                 if clean:
                     history.append({"role": "assistant", "content": clean})
         return history
@@ -269,19 +283,27 @@ class WebAdapter(PlatformAdapter):
 
     async def _handle_resume(self) -> None:
         self._pm.resume_from_human()
-        await self._ws.send_text(json.dumps({
-            "type": "info",
-            "message": "Agent resumed execution.",
-            "message_key": "common.agent_resumed",
-        }))
+        await self._ws.send_text(
+            json.dumps(
+                {
+                    "type": "info",
+                    "message": "Agent resumed execution.",
+                    "message_key": "common.agent_resumed",
+                }
+            )
+        )
 
     async def _handle_takeover(self) -> None:
         if self._pm.in_takeover:
-            await self._ws.send_text(json.dumps({
-                "type": "info",
-                "message": "Takeover is already in progress.",
-                "message_key": "common.takeover_already_active",
-            }))
+            await self._ws.send_text(
+                json.dumps(
+                    {
+                        "type": "info",
+                        "message": "Takeover is already in progress.",
+                        "message_key": "common.takeover_already_active",
+                    }
+                )
+            )
             return
 
         self._pm.request_pause()
@@ -297,18 +319,25 @@ class WebAdapter(PlatformAdapter):
 
             initial_screenshot = await self._pm.get_page_screenshot_base64()
 
-            await self._ws.send_text(json.dumps({
-                "type": "takeover_started",
-                "message": "Browser embedded for manual interaction.",
-                "message_key": "common.takeover_started",
-                "url": current_url,
-                "image": initial_screenshot,
-                "viewport": {
-                    "width": self._pm.viewport_width,
-                    "height": self._pm.viewport_height,
-                },
-            }))
-            self._append_message("assistant", "[Takeover] Browser opened for manual interaction.")
+            await self._ws.send_text(
+                json.dumps(
+                    {
+                        "type": "takeover_started",
+                        "message": "Browser embedded for manual interaction.",
+                        "message_key": "common.takeover_started",
+                        "url": current_url,
+                        "image": initial_screenshot,
+                        "viewport": {
+                            "width": self._pm.viewport_width,
+                            "height": self._pm.viewport_height,
+                        },
+                    }
+                )
+            )
+            self._append_message(
+                "assistant",
+                "[Takeover] Browser opened for manual interaction.",
+            )
 
             # Mark as in takeover and create the completion event.
             done_event = self._pm.begin_embedded_takeover()
@@ -316,11 +345,15 @@ class WebAdapter(PlatformAdapter):
             # Stream screenshots to the frontend.
             async def send_frame(screenshot_b64: str, url: str) -> None:
                 try:
-                    await self._ws.send_text(json.dumps({
-                        "type": "takeover_frame",
-                        "image": screenshot_b64,
-                        "url": url,
-                    }))
+                    await self._ws.send_text(
+                        json.dumps(
+                            {
+                                "type": "takeover_frame",
+                                "image": screenshot_b64,
+                                "url": url,
+                            }
+                        )
+                    )
                 except Exception as e:
                     print(f"Takeover frame send error: {e}")
 
@@ -409,17 +442,23 @@ class WebAdapter(PlatformAdapter):
         if self._session_id in _web_running:
             if self._session_id not in _web_queues:
                 _web_queues[self._session_id] = asyncio.Queue()
-            await _web_queues[self._session_id].put({
-                "text": user_msg,
-                "images": user_images,
-                "files": user_files,
-            })
+            await _web_queues[self._session_id].put(
+                {
+                    "text": user_msg,
+                    "images": user_images,
+                    "files": user_files,
+                }
+            )
             # Inform the user
-            await self._ws.send_text(json.dumps({
-                "type": "info",
-                "message": "Message queued (agent is busy).",
-                "message_key": "common.message_queued",
-            }))
+            await self._ws.send_text(
+                json.dumps(
+                    {
+                        "type": "info",
+                        "message": "Message queued (agent is busy).",
+                        "message_key": "common.message_queued",
+                    }
+                )
+            )
             return
 
         # Save uploaded images to workspace and collect paths
@@ -430,7 +469,9 @@ class WebAdapter(PlatformAdapter):
                 media_type = header.split(":")[1].split(";")[0]
                 ext = media_type.split("/")[1] if "/" in media_type else "bin"
                 ext = ext.replace("+xml", "")
-                filename = f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{i}.{ext}"
+                filename = (
+                    f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{i}.{ext}"
+                )
                 filepath = self._uploads_dir / filename
                 filepath.write_bytes(base64.b64decode(b64_data))
                 saved_paths.append(str(filepath))
@@ -453,14 +494,19 @@ class WebAdapter(PlatformAdapter):
                 saved_paths.append(str(filepath))
                 logger.info("Saved uploaded file: %s", filepath)
             except Exception as e:
-                logger.warning("Failed to save uploaded file %s: %s", file_data.get("name"), e)
+                logger.warning(
+                    "Failed to save uploaded file %s: %s", file_data.get("name"), e
+                )
 
         self._append_message("user", user_msg, images=user_images)
 
         # Dispatch to on_message callback if set (allows external orchestration)
         if self.on_message is not None:
             attachments = [(f"image_{i}", du) for i, du in enumerate(user_images)]
-            attachments.extend((f.get("name", f"file_{i}"), f.get("data", "")) for i, f in enumerate(user_files))
+            attachments.extend(
+                (f.get("name", f"file_{i}"), f.get("data", ""))
+                for i, f in enumerate(user_files)
+            )
             unified = UnifiedMessage(
                 platform="web",
                 user_id="web_user",
@@ -476,10 +522,16 @@ class WebAdapter(PlatformAdapter):
             if isinstance(msg, dict):
                 human_text = msg.get("message", "")
                 packet = {"type": "info", **msg}
+                self._append_message(
+                    "assistant",
+                    human_text,
+                    message_key=msg.get("message_key", ""),
+                    params=msg.get("params"),
+                )
             else:
                 human_text = str(msg)
                 packet = {"type": "info", "message": human_text}
-            self._append_message("assistant", human_text)
+                self._append_message("assistant", human_text)
             await self._ws.send_text(json.dumps(packet))
 
         # Mark as running
@@ -491,7 +543,9 @@ class WebAdapter(PlatformAdapter):
                     self._pm,
                     user_msg,
                     _ws_send_msg,
-                    lambda reason, img: self.request_action(self._session_id, reason, img),
+                    lambda reason, img: self.request_action(
+                        self._session_id, reason, img
+                    ),
                     self._send_image,
                     lambda path, desc: self.send_file(self._session_id, path, desc),
                     images=user_images,

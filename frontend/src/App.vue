@@ -5,6 +5,7 @@ import { marked } from 'marked'
 import Sidebar from './components/Sidebar.vue'
 import MainInput from './components/MainInput.vue'
 import BrowserView from './components/BrowserView.vue'
+import ThinkingChain from './components/ThinkingChain.vue'
 import { useChatHistory } from './composables/useChatHistory'
 import { useDebugMode } from './composables/useDebugMode'
 
@@ -109,12 +110,8 @@ function isToolCallMessage(msg: any): boolean {
          (msg.message && msg.message.startsWith('Executing action:'))
 }
 
-function isTechMessage(msg: any): boolean {
-  return isThinkingMessage(msg) || isToolCallMessage(msg) || isHiddenMessage(msg)
-}
-
 function isHiddenMessage(msg: any): boolean {
-  const hiddenKeys = ['common.connected_ws', 'common.context_compressing', 'common.manual_compressing', 'common.agent_resumed', 'common.sent_resume']
+  const hiddenKeys = ['common.connected_ws', 'common.context_compressing', 'common.manual_compressing', 'common.agent_resumed', 'common.sent_resume', 'common.message_queued']
   if (hiddenKeys.includes(msg.message_key)) return true
   if (msg.message === 'Connected to NeoFish Agent WebSocket') return true
   if (msg.message && msg.message.includes('Context threshold reached')) return true
@@ -135,21 +132,125 @@ function getToolDisplayName(toolName: string): string {
   return translated === key ? t('tools.default') : translated
 }
 
+function translateMessageFallback(msg: string): { message_key?: string; params?: Record<string, any> } {
+  if (msg === '[Takeover] Browser opened for manual interaction.') {
+    return { message_key: 'common.takeover_browser_opened' }
+  }
+  if (msg.startsWith('[Takeover Ended] Resumed at:')) {
+    const urlMatch = msg.match(/Resumed at: (.+)/)
+    return { message_key: 'common.takeover_ended_message', params: { url: urlMatch ? urlMatch[1] : '' } }
+  }
+  if (msg.startsWith('[Action Required]')) {
+    return { message_key: 'common.action_required_prefix' }
+  }
+  if (msg.startsWith('Agent starting task:')) {
+    const task = msg.replace('Agent starting task: ', '')
+    return { message_key: 'common.agent_starting', params: { task } }
+  }
+  if (msg === 'Agent paused for manual takeover. Waiting for you to finish…') {
+    return { message_key: 'common.agent_paused_for_takeover' }
+  }
+  return {}
+}
+
 function renderMarkdown(text: string): string {
   return marked.parse(text) as string
 }
 
-function pushMessage(data: any) {
-  if (!isHiddenMessage(data) && !isTechMessage(data)) {
-    for (let i = messages.value.length - 1; i >= 0; i--) {
-      const msg = messages.value[i]
-      if (isToolCallMessage(msg) && !msg._completed) {
-        msg._completed = true
-      } else if (!isTechMessage(msg)) {
-        break
+interface ThinkingStep {
+  type: 'thinking' | 'tool'
+  content: string
+  completed: boolean
+}
+
+interface ProcessedMessage {
+  type: string
+  message?: string
+  message_key?: string
+  params?: Record<string, any>
+  images?: string[]
+  files?: { name: string; data: string; type: string }[]
+  image?: string
+  description?: string
+  reason?: string
+  final_url?: string
+  mime_type?: string
+  data?: string
+  filename?: string
+  thinkingChain?: {
+    steps: ThinkingStep[]
+    isActive: boolean
+  }
+}
+
+const processedMessages = computed(() => {
+  if (debugMode.value) {
+    return messages.value.map(msg => ({ ...msg }))
+  }
+  
+  const result: ProcessedMessage[] = []
+  let currentChain: { steps: ThinkingStep[]; startIdx: number } | null = null
+  
+  for (let i = 0; i < messages.value.length; i++) {
+    const msg = messages.value[i]
+    
+    if (isHiddenMessage(msg)) continue
+    
+    if (isThinkingMessage(msg) || isToolCallMessage(msg)) {
+      if (!currentChain) {
+        currentChain = { steps: [], startIdx: i }
       }
+      
+      if (isThinkingMessage(msg)) {
+        currentChain.steps.push({
+          type: 'thinking',
+          content: t('status.thinking'),
+          completed: false
+        })
+      } else {
+        currentChain.steps.push({
+          type: 'tool',
+          content: getToolDisplayName(getToolName(msg) || ''),
+          completed: false
+        })
+        if (currentChain.steps.length > 1) {
+          const prevStep = currentChain.steps[currentChain.steps.length - 2]
+          if (prevStep) prevStep.completed = true
+        }
+      }
+    } else {
+      if (currentChain) {
+        if (currentChain.steps.length > 0) {
+          const lastStep = currentChain.steps[currentChain.steps.length - 1]
+          if (lastStep) lastStep.completed = true
+        }
+        result.push({
+          type: 'thinking_chain',
+          thinkingChain: {
+            steps: currentChain.steps,
+            isActive: false
+          }
+        })
+        currentChain = null
+      }
+      result.push({ ...msg })
     }
   }
+  
+  if (currentChain && currentChain.steps.length > 0) {
+    result.push({
+      type: 'thinking_chain',
+      thinkingChain: {
+        steps: currentChain.steps,
+        isActive: true
+      }
+    })
+  }
+  
+  return result
+})
+
+function pushMessage(data: any) {
   messages.value.push(data)
   if (activeChatId.value && (data.type === 'info' || data.type === 'user')) {
     const preview = (data.message || '').slice(0, 80)
@@ -187,9 +288,13 @@ async function switchToSession(id: string) {
             image: m.image_data
           }
         } else if (m.content.startsWith('[Takeover Ended]')) {
+          const urlMatch = m.content.match(/Resumed at: (.+)/)
           return {
             type: 'takeover_ended',
             message: m.content.replace('[Takeover Ended] ', ''),
+            message_key: 'common.takeover_ended_message',
+            params: { url: urlMatch ? urlMatch[1] : '' },
+            final_url: urlMatch ? urlMatch[1] : '',
             image: m.image_data
           }
         }
@@ -197,6 +302,8 @@ async function switchToSession(id: string) {
       return {
         type: m.role === 'user' ? 'user' : 'info',
         message: m.content,
+        message_key: m.message_key || translateMessageFallback(m.content).message_key,
+        params: m.params || translateMessageFallback(m.content).params,
         images: m.images ?? [],
       }
     })
@@ -333,12 +440,19 @@ onUnmounted(() => {
       <div v-else class="flex-1 flex flex-col max-w-4xl mx-auto w-full pt-20 pb-6 px-4 min-h-0">
         <!-- Chat history stream -->
         <div ref="scrollContainer" class="flex-1 overflow-y-auto space-y-6 pb-20 custom-scrollbar pr-4">
-          <div v-for="(msg, idx) in messages" :key="idx" 
-               class="p-4 rounded-2xl max-w-[85%] animate-fade-in-up"
-               :class="msg.type === 'user' ? 'bg-neutral-100 text-neutral-800 ml-auto rounded-tr-sm' : 'bg-white border border-neutral-100 shadow-sm mr-auto rounded-tl-sm'">
+          <div v-for="(msg, idx) in processedMessages" :key="idx" 
+               class="max-w-[85%] animate-fade-in-up"
+               :class="msg.type === 'user' ? 'bg-neutral-100 text-neutral-800 ml-auto rounded-tr-sm p-4 rounded-2xl' : (msg.type === 'thinking_chain' ? 'mr-auto w-full' : 'bg-white border border-neutral-100 shadow-sm mr-auto rounded-tl-sm p-4 rounded-2xl')">
             
-            <div v-if="msg.type === 'user'" class="flex flex-col gap-2">
-              <!-- Attached images -->
+            <!-- Thinking Chain -->
+            <ThinkingChain 
+              v-if="msg.type === 'thinking_chain'"
+              :steps="msg.thinkingChain?.steps || []"
+              :isActive="msg.thinkingChain?.isActive || false"
+            />
+            
+            <!-- User message -->
+            <div v-else-if="msg.type === 'user'" class="flex flex-col gap-2">
               <div v-if="msg.images && msg.images.length > 0" class="flex flex-wrap gap-2">
                 <img
                   v-for="(src, i) in msg.images"
@@ -348,7 +462,6 @@ onUnmounted(() => {
                   alt="attached image"
                 />
               </div>
-              <!-- Attached files -->
               <div v-if="msg.files && msg.files.length > 0" class="flex flex-wrap gap-2">
                 <div
                   v-for="(file, i) in msg.files"
@@ -361,37 +474,19 @@ onUnmounted(() => {
               <div v-if="msg.message" class="text-[15px] leading-relaxed">{{ msg.message }}</div>
             </div>
             
+            <!-- Info message (AI response) -->
             <div v-else-if="msg.type === 'info'" class="flex gap-3">
-              <template v-if="isHiddenMessage(msg) && !debugMode"></template>
-              <template v-else-if="isThinkingMessage(msg) && !debugMode">
-                <div class="w-6 h-6 rounded-full bg-neutral-900 flex-shrink-0 flex items-center justify-center">
-                  <span class="text-white text-[10px] font-bold">AI</span>
-                </div>
-                <div class="text-[15px] leading-relaxed text-neutral-700 font-serif">
-                  {{ $t('status.thinking') }}
-                </div>
-              </template>
-              <template v-else-if="isToolCallMessage(msg) && !debugMode">
-                <div class="w-6 h-6 rounded-full bg-neutral-900 flex-shrink-0 flex items-center justify-center">
-                  <span class="text-white text-[10px] font-bold">AI</span>
-                </div>
-                <div class="text-[15px] leading-relaxed text-neutral-700 font-serif">
-                  {{ msg._completed ? $t('status.completed') : getToolDisplayName(getToolName(msg) || '') }}
-                </div>
-              </template>
-              <template v-else>
-                <div class="w-6 h-6 rounded-full bg-neutral-900 flex-shrink-0 flex items-center justify-center">
-                  <span class="text-white text-[10px] font-bold">AI</span>
-                </div>
-                <div 
-                  class="text-[15px] leading-relaxed text-neutral-700 font-serif prose prose-sm prose-neutral max-w-none"
-                  v-html="renderMarkdown(msg.message_key ? $t(msg.message_key, msg.params || {}) : msg.message)"
-                ></div>
-              </template>
+              <div class="w-6 h-6 rounded-full bg-neutral-900 flex-shrink-0 flex items-center justify-center">
+                <span class="text-white text-[10px] font-bold">AI</span>
+              </div>
+              <div 
+                class="text-[15px] leading-relaxed text-neutral-700 font-serif prose prose-sm prose-neutral max-w-none"
+                v-html="renderMarkdown(msg.message_key ? $t(msg.message_key, msg.params || {}) : msg.message || '')"
+              ></div>
             </div>
 
             <!-- Takeover started notification -->
-            <div v-else-if="msg.type === 'takeover_started'" class="flex flex-col gap-3 w-full">
+            <div v-else-if="msg.type === 'takeover_started'" class="flex flex-col gap-3 w-full p-4 bg-white border border-neutral-100 shadow-sm rounded-2xl rounded-tl-sm">
               <div class="flex gap-3">
                 <div class="w-6 h-6 rounded-full bg-amber-500 flex-shrink-0 flex items-center justify-center shadow-sm">
                   <span class="text-white text-[11px] font-bold">↗</span>
@@ -402,15 +497,14 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- Takeover ended notification (with final screenshot) -->
-            <div v-else-if="msg.type === 'takeover_ended'" class="flex flex-col gap-3 w-full">
+            <!-- Takeover ended notification -->
+            <div v-else-if="msg.type === 'takeover_ended'" class="flex flex-col gap-3 w-full p-4 bg-white border border-neutral-100 shadow-sm rounded-2xl rounded-tl-sm">
               <div class="flex gap-3">
                 <div class="w-6 h-6 rounded-full bg-green-600 flex-shrink-0 flex items-center justify-center shadow-sm">
                   <span class="text-white text-[11px] font-bold">✓</span>
                 </div>
                 <div class="text-[15px] leading-relaxed text-neutral-700 font-medium pt-0.5">
-                  {{ msg.message_key ? $t(msg.message_key) : msg.message }}
-                  <span v-if="msg.final_url" class="block text-xs text-neutral-400 mt-0.5 font-mono">{{ msg.final_url }}</span>
+                  {{ msg.message_key ? $t(msg.message_key, msg.params || {}) : msg.message }}
                 </div>
               </div>
               <div v-if="msg.image" class="mt-1 rounded-xl overflow-hidden border border-neutral-200/60 shadow-sm bg-neutral-50/50 p-2">
@@ -418,7 +512,8 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div v-else-if="msg.type === 'image'" class="flex flex-col gap-3 w-full">
+            <!-- Image message -->
+            <div v-else-if="msg.type === 'image'" class="flex flex-col gap-3 w-full p-4 bg-white border border-neutral-100 shadow-sm rounded-2xl rounded-tl-sm">
               <div class="flex gap-3">
                 <div class="w-6 h-6 rounded-full bg-neutral-900 flex-shrink-0 flex items-center justify-center">
                   <span class="text-white text-[10px] font-bold">AI</span>
@@ -430,8 +525,8 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- File message from agent -->
-            <div v-else-if="msg.type === 'file'" class="flex flex-col gap-3 w-full">
+            <!-- File message -->
+            <div v-else-if="msg.type === 'file'" class="flex flex-col gap-3 w-full p-4 bg-white border border-neutral-100 shadow-sm rounded-2xl rounded-tl-sm">
               <div class="flex gap-3">
                 <div class="w-6 h-6 rounded-full bg-neutral-900 flex-shrink-0 flex items-center justify-center">
                   <span class="text-white text-[10px] font-bold">AI</span>
@@ -455,7 +550,8 @@ onUnmounted(() => {
               </a>
             </div>
 
-            <div v-else-if="msg.type === 'action_required'" class="flex flex-col gap-4 w-full">
+            <!-- Action required -->
+            <div v-else-if="msg.type === 'action_required'" class="flex flex-col gap-4 w-full p-4 bg-white border border-neutral-100 shadow-sm rounded-2xl rounded-tl-sm">
               <div class="flex gap-3">
                 <div class="w-6 h-6 rounded-full bg-orange-500 flex-shrink-0 flex items-center justify-center shadow-sm">
                   <span class="text-white text-[12px] font-bold">!</span>
@@ -468,14 +564,12 @@ onUnmounted(() => {
                 <img :src="'data:image/jpeg;base64,' + msg.image" class="w-full h-auto object-contain max-h-[400px] rounded-lg" alt="Action Required" />
               </div>
               <div class="flex flex-wrap gap-3 mt-1">
-                <!-- Take Control: opens embedded browser for direct user interaction -->
                 <button
                   @click="requestTakeover"
                   class="px-6 py-2.5 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all font-medium text-sm shadow-md active:scale-95"
                 >
                   {{ $t('common.takeover_button') }}
                 </button>
-                <!-- Resume: plain signal without opening browser -->
                 <button @click="resumeAgent" class="px-6 py-2.5 bg-neutral-900 text-white rounded-xl hover:bg-neutral-800 transition-all font-medium text-sm shadow-md active:scale-95">
                   {{ $t('common.resume_button') }}
                 </button>

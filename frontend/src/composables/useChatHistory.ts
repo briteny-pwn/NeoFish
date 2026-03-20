@@ -13,6 +13,9 @@ export interface ChatMessage {
   content: string
   timestamp: string
   images?: string[]
+  image_data?: string
+  message_key?: string
+  params?: Record<string, any>
 }
 
 const BASE = 'http://localhost:8000'

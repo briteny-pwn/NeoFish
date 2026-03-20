@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import ChatHistoryPanel from './ChatHistoryPanel.vue'
 import { useDebugMode } from '../composables/useDebugMode'
 
-const { locale, t } = useI18n()
+const { locale } = useI18n()
 const { debugMode, toggleDebug } = useDebugMode()
 const emit = defineEmits<{
   (e: 'new-chat'): void

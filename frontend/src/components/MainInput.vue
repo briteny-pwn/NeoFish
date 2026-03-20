@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { Plus, ArrowUp, FileText, Globe, X, File, Image, FileVideo, FileAudio } from 'lucide-vue-next'
 
 const props = defineProps<{

@@ -3,11 +3,14 @@
     "agent_ready": "代理就绪",
     "connecting": "正在连接...",
     "action_required": "需要您的协助",
+    "action_required_prefix": "需要您的协助",
     "resume_button": "我已处理完毕，继续执行",
     "takeover_button": "接管浏览器",
     "takeover_done_button": "完成操作",
     "takeover_started": "浏览器已嵌入页面，您可在此直接操作",
+    "takeover_browser_opened": "浏览器已打开，您可以手动操作",
     "takeover_ended": "接管结束，AI 正在继续执行…",
+    "takeover_ended_message": "接管结束，继续执行于：{url}",
     "takeover_already_active": "接管操作正在进行中。",
     "takeover_banner": "浏览器已嵌入，您可直接操作",
     "proactive_takeover": "手动接管",
@@ -76,5 +79,10 @@
   "status": {
     "thinking": "正在思考...",
     "completed": "完成思考"
+  },
+  "thinking": {
+    "process": "思考过程",
+    "completed": "已完成 · {count} 步",
+    "steps": "步"
   }
 }
