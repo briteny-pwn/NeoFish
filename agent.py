@@ -477,7 +477,7 @@ async def run_agent_loop(
     })
 
     messages = history_messages.copy()
-    max_steps = 200
+    max_steps = 9999999
     is_finished = False
 
     # Build first user message with context about uploaded files
