@@ -409,14 +409,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-screen w-full flex bg-[#FDFBF7] font-sans selection:bg-neutral-200">
+  <div class="h-screen w-full flex overflow-hidden bg-[#FDFBF7] font-sans selection:bg-neutral-200">
     <Sidebar
       @new-chat="handleNewChat"
       @select-chat="switchToSession"
     />
     
-    <!-- Main content: offset by sidebar icon rail (w-16 = 64px) -->
-    <main class="flex-1 flex flex-col relative h-full" style="margin-left: 64px">
+    <main class="relative flex h-full min-w-0 flex-1 flex-col">
       <!-- Top nav indicator -->
       <header class="absolute top-0 left-0 w-full p-6 flex justify-end gap-3 z-10 pointer-events-none">
         <!-- Agent status indicator + proactive takeover button -->
