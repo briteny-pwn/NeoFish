@@ -115,7 +115,11 @@ function formatDate(iso: string) {
             <p class="theme-text-primary truncate text-sm font-medium leading-snug">
               {{ session.title || $t('history.new_chat') }}
             </p>
-            <p v-if="session.preview" class="theme-text-muted mt-0.5 truncate text-xs leading-relaxed">
+            <p
+              v-if="session.preview"
+              class="theme-text-muted mt-0.5 overflow-hidden text-[11px] leading-5"
+              style="display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal;"
+            >
               {{ session.preview }}
             </p>
             <p class="theme-text-muted mt-1 text-[10px] opacity-80">{{ formatDate(session.created_at) }}</p>

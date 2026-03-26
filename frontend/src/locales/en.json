@@ -29,6 +29,7 @@
     "max_steps_error": "⚠️ Task reached maximum steps without calling finish_task.",
     "context_compressing": "Context threshold reached, compressing...",
     "manual_compressing": "Manual compression triggered...",
+    "image_input_disabled": "The current model endpoint does not accept image input. Continuing in text-only mode.",
     "file_sent": "File sent",
     "click_to_download": "Click to download"
   },
@@ -72,6 +73,11 @@
     "type_text": "Typing",
     "scroll": "Scrolling",
     "snapshot": "Analyzing page",
+    "extract_info": "Summarizing info",
+    "task_create": "Creating task",
+    "task_get": "Loading task",
+    "task_update": "Updating task",
+    "task_list": "Reviewing tasks",
     "request_human_assistance": "Waiting for your confirmation",
     "go_back": "Going back",
     "go_forward": "Going forward",
@@ -90,5 +96,10 @@
     "process": "Thinking Process",
     "completed": "Completed · {count} steps",
     "steps": "steps"
+  },
+  "tasks": {
+    "toggle": "Tasks",
+    "loading_inline": "Syncing tasks",
+    "empty_inline": "No tasks yet"
   }
 }

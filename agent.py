@@ -2,12 +2,13 @@ import os
 import json
 import asyncio
 import time
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
 from playwright_manager import PlaywrightManager
 from workspace_manager import WorkspaceManager
-from task_manager import TaskManager
+from task_manager import task_manager
 from background_manager import background_manager
 
 load_dotenv()
@@ -26,7 +27,6 @@ KEEP_RECENT = 3  # For microcompact
 
 # Initialize managers
 workspace = WorkspaceManager(WORKDIR, strict=False)
-task_manager = TaskManager()
 
 SYSTEM_PROMPT = """You are NeoFish, an autonomous agent that can:
 1. **Browse the web** - Navigate, click, type, extract information
@@ -74,6 +74,9 @@ Tasks persist across context compression. Use them to track progress on complex 
 - `task_list` - List all tasks with their status
 - `task_get` - Get full details of a specific task
 - `task_update` - Update task status or dependencies
+- For non-trivial multi-step requests, maintain persistent task state proactively.
+- If the system tells you a root task was auto-created, do not create a duplicate root task.
+- When such a root task exists, keep it updated and mark it completed before `finish_task`.
 
 ## Background Tasks
 For commands that take a long time:
@@ -531,6 +534,122 @@ async def auto_compact(messages: list, focus: str = None) -> list:
     ]
 
 
+_SIMPLE_CHAT_INPUTS = {
+    "hi",
+    "hello",
+    "hey",
+    "你好",
+    "您好",
+    "嗨",
+    "在吗",
+}
+
+_TASK_ACTION_HINTS = (
+    "打开",
+    "访问",
+    "搜索",
+    "查找",
+    "点击",
+    "输入",
+    "浏览",
+    "分析",
+    "总结",
+    "整理",
+    "生成",
+    "制作",
+    "发送",
+    "读取",
+    "提取",
+    "下载",
+    "截图",
+    "navigate",
+    "search",
+    "open ",
+    "visit ",
+    "analyze",
+    "summarize",
+    "generate",
+)
+
+_EXPLICIT_TASK_HINTS = (
+    "task_create",
+    "task_update",
+    "task_get",
+    "task_list",
+    "创建一个任务",
+    "创建任务",
+    "更新任务",
+    "标记为 completed",
+    "标记这个任务",
+)
+
+
+def _contains_explicit_task_request(text: str) -> bool:
+    lowered = text.lower()
+    return any(hint.lower() in lowered for hint in _EXPLICIT_TASK_HINTS)
+
+
+def _should_auto_create_task(
+    instruction: str, images: list, uploaded_files: list
+) -> bool:
+    text = (instruction or "").strip()
+    if not text:
+        return False
+
+    lowered = text.lower()
+    if lowered in _SIMPLE_CHAT_INPUTS:
+        return False
+
+    if _contains_explicit_task_request(text):
+        return False
+
+    signal_score = 0
+
+    if images or uploaded_files:
+        signal_score += 1
+
+    if "http://" in lowered or "https://" in lowered:
+        signal_score += 2
+
+    if any(hint.lower() in lowered for hint in _TASK_ACTION_HINTS):
+        signal_score += 1
+
+    if any(token in text for token in ("，", "。", "然后", "并且", "最后", "\n")):
+        signal_score += 1
+
+    if len(text) >= 18:
+        signal_score += 1
+
+    return signal_score >= 2
+
+
+def _build_auto_task_subject(instruction: str) -> str:
+    clean = re.sub(r"https?://\S+", lambda m: m.group(0)[:28], instruction).strip()
+    clean = re.sub(r"^(请|帮我|麻烦|请帮我|帮忙)\s*", "", clean)
+    clean = re.sub(r"\s+", " ", clean)
+    first_sentence = re.split(r"[。！？\n]", clean, maxsplit=1)[0]
+    subject = first_sentence[:28].strip()
+    if len(first_sentence) > 28:
+        subject += "…"
+    return subject or "执行用户请求"
+
+
+def _auto_create_root_task(
+    instruction: str, images: list, uploaded_files: list
+) -> dict | None:
+    if not _should_auto_create_task(instruction, images, uploaded_files):
+        return None
+
+    created = task_manager.create(
+        subject=_build_auto_task_subject(instruction),
+        description=instruction.strip(),
+    )
+    task = json.loads(created)
+    task_manager.update(task["id"], status="in_progress")
+    task["status"] = "in_progress"
+    return task
+
+
 # ============== Main Agent Loop ==============
 
 
@@ -567,6 +686,8 @@ async def run_agent_loop(
             }
         )
         return
+
+    auto_root_task = _auto_create_root_task(user_instruction, images, uploaded_files)
 
     await ws_send_msg(
         {
@@ -611,6 +732,17 @@ async def run_agent_loop(
             {"type": "text", "text": f"Please execute this task: {user_instruction}"}
         ]
 
+    if auto_root_task:
+        user_content[0]["text"] += (
+            "\n\nA persistent root task has already been auto-created for this request:\n"
+            f"- task_id: {auto_root_task['id']}\n"
+            f"- subject: {auto_root_task['subject']}\n"
+            "- Its status is already `in_progress`.\n"
+            "- Do not create a duplicate root task for the same request.\n"
+            "- Update this root task when needed and mark it `completed` before calling finish_task.\n"
+            "- You may create additional sub-tasks only if they are genuinely useful."
+        )
+
     # Add images as base64 for vision
     if images:
         for data_url in images:
@@ -632,6 +764,8 @@ async def run_agent_loop(
 
     for step in range(max_steps):
         if cancel_event and cancel_event.is_set():
+            if auto_root_task:
+                task_manager.update(auto_root_task["id"], status="pending")
             await ws_send_msg(
                 {
                     "message": "Task cancelled by user.",
@@ -754,8 +888,33 @@ async def run_agent_loop(
                 tools=TOOLS,
             )
         except Exception as e:
-            await ws_send_msg(f"Error calling LLM: {str(e)}")
-            break
+            err_text = str(e)
+            if "image_url" in err_text or "validation errors for ValidatorIterator" in err_text:
+                user_content = [
+                    block for block in user_content
+                    if not (isinstance(block, dict) and block.get("type") == "image")
+                ]
+                messages[-1] = {"role": "user", "content": user_content}
+                await ws_send_msg(
+                    {
+                        "message": "当前模型网关不接受图片输入，已自动切换为纯文本模式继续执行。",
+                        "message_key": "common.image_input_disabled",
+                    }
+                )
+                try:
+                    response = await client.messages.create(
+                        model=model_name,
+                        max_tokens=4096,
+                        system=SYSTEM_PROMPT,
+                        messages=messages,
+                        tools=TOOLS,
+                    )
+                except Exception as retry_error:
+                    await ws_send_msg(f"Error calling LLM: {str(retry_error)}")
+                    break
+            else:
+                await ws_send_msg(f"Error calling LLM: {err_text}")
+                break
 
         messages.append({"role": "assistant", "content": response.content})
 
@@ -767,13 +926,8 @@ async def run_agent_loop(
             text_blocks = [b.text for b in response.content if b.type == "text"]
             if text_blocks:
                 msg = "\n".join(text_blocks)
-                await ws_send_msg("🤔 " + msg)
-                user_content.append(
-                    {
-                        "type": "text",
-                        "text": "You didn't call any tools. Please use a tool to proceed.",
-                    }
-                )
+                await ws_send_msg(msg)
+                break
             continue
 
         manual_compact = False
@@ -867,6 +1021,8 @@ async def run_agent_loop(
 
                 elif tool_name == "finish_task":
                     report = args.get("report", "Task completed.")
+                    if auto_root_task:
+                        task_manager.update(auto_root_task["id"], status="completed")
                     await ws_send_msg(
                         {
                             "message": f"✅ **Task Completed**:\n\n{report}",
@@ -982,6 +1138,8 @@ async def run_agent_loop(
             break
 
     if not is_finished:
+        if auto_root_task:
+            task_manager.update(auto_root_task["id"], status="pending")
         await ws_send_msg(
             {
                 "message": "⚠️ Task reached maximum steps without calling finish_task.",

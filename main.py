@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ import os
 from playwright_manager import PlaywrightManager
 from agent import run_agent_loop
 from platforms.web import WebAdapter
+from task_manager import task_manager
 
 pm = PlaywrightManager()
 
@@ -46,6 +48,93 @@ def _save_sessions():
 
 sessions: dict = _load_sessions()  # {session_id: {title, created_at, messages: [...]}}
 
+_HIDDEN_PREVIEW_KEYS = {
+    "common.connected_ws",
+    "common.context_compressing",
+    "common.manual_compressing",
+    "common.agent_resumed",
+    "common.sent_resume",
+    "common.message_queued",
+    "common.agent_starting",
+    "common.agent_thinking",
+    "common.executing_action",
+    "common.takeover_browser_opened",
+    "common.takeover_ended_message",
+    "common.agent_paused_for_takeover",
+    "common.image_input_disabled",
+    "common.max_steps_error",
+}
+
+_HIDDEN_PREVIEW_PREFIXES = (
+    "[Image] ",
+    "[Action Required] ",
+    "[Takeover] ",
+    "[Takeover Ended] ",
+    "Executing action:",
+    "Agent is thinking",
+    "Error calling LLM:",
+)
+
+_HIDDEN_PREVIEW_SNIPPETS = (
+    "Connected to NeoFish Agent WebSocket",
+    "Task reached maximum steps without calling finish_task",
+    "Context threshold reached",
+    "Manual compression triggered",
+    "Agent paused for manual takeover",
+    "已发送继续执行",
+)
+
+
+def _strip_markdown_preview(text: str) -> str:
+    clean = text or ""
+    clean = re.sub(r"!\[[^\]]*]\([^)]+\)", " ", clean)
+    clean = re.sub(r"\[([^\]]+)]\(([^)]+)\)", r"\1", clean)
+    clean = re.sub(r"^\s{0,3}#{1,6}\s*", "", clean, flags=re.MULTILINE)
+    clean = re.sub(r"^\s*[-*+]\s+", "", clean, flags=re.MULTILINE)
+    clean = re.sub(r"^\s*\d+\.\s+", "", clean, flags=re.MULTILINE)
+    clean = re.sub(r"[`*_~]+", "", clean)
+    clean = re.sub(r"^>\s*", "", clean, flags=re.MULTILINE)
+    clean = re.sub(r"\s+", " ", clean)
+    return clean.strip().strip("\"'")
+
+
+def _preview_text(msg: dict) -> str:
+    if msg.get("message_key") == "common.task_completed":
+        report = (msg.get("params") or {}).get("report")
+        if isinstance(report, str) and report.strip():
+            return report
+    return msg.get("content") or ""
+
+
+def _is_preview_candidate(msg: dict) -> bool:
+    content = _strip_markdown_preview(_preview_text(msg))
+    if not content:
+        return False
+
+    if msg.get("role") == "user":
+        return True
+
+    if msg.get("message_key") in _HIDDEN_PREVIEW_KEYS:
+        return False
+
+    if any(content.startswith(prefix) for prefix in _HIDDEN_PREVIEW_PREFIXES):
+        return False
+
+    if any(snippet in content for snippet in _HIDDEN_PREVIEW_SNIPPETS):
+        return False
+
+    return True
+
+
+def _extract_session_preview(messages: list[dict]) -> str:
+    for msg in reversed(messages):
+        if not _is_preview_candidate(msg):
+            continue
+        preview = _strip_markdown_preview(_preview_text(msg))
+        if preview:
+            return preview[:120]
+    return ""
+
 
 def _new_session(title: str = "") -> dict:
     sid = str(uuid.uuid4())
@@ -61,12 +150,11 @@ def _new_session(title: str = "") -> dict:
 
 def _session_preview(s: dict) -> dict:
     msgs = s.get("messages", [])
-    last_msg = msgs[-1]["content"] if msgs else ""
     return {
         "id": s["id"],
         "title": s["title"] or "New Chat",
         "created_at": s["created_at"],
-        "preview": last_msg[:80] if last_msg else "",
+        "preview": _extract_session_preview(msgs),
         "message_count": len(msgs),
     }
 
@@ -143,6 +231,18 @@ def get_messages(session_id: str):
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     return sessions[session_id]["messages"]
+
+
+@app.get("/tasks")
+def list_tasks():
+    tasks = task_manager.list_tasks()
+    summary = {
+        "total": len(tasks),
+        "pending": sum(1 for task in tasks if task.get("status") == "pending"),
+        "in_progress": sum(1 for task in tasks if task.get("status") == "in_progress"),
+        "completed": sum(1 for task in tasks if task.get("status") == "completed"),
+    }
+    return {"tasks": tasks, "summary": summary}
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

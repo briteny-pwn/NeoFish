@@ -29,6 +29,7 @@
     "max_steps_error": "⚠️ 任务达到最大步数，未调用 finish_task。",
     "context_compressing": "上下文达到阈值，正在压缩...",
     "manual_compressing": "手动压缩已触发...",
+    "image_input_disabled": "当前模型网关不接受图片输入，已自动切换为纯文本模式继续执行。",
     "file_sent": "文件已发送",
     "click_to_download": "点击下载"
   },
@@ -72,6 +73,11 @@
     "type_text": "正在输入",
     "scroll": "正在滚动",
     "snapshot": "正在分析页面",
+    "extract_info": "正在整理信息",
+    "task_create": "正在创建任务",
+    "task_get": "正在读取任务",
+    "task_update": "正在更新任务",
+    "task_list": "正在整理任务",
     "request_human_assistance": "等待您的确认",
     "go_back": "正在返回上一页",
     "go_forward": "正在前进",
@@ -90,5 +96,10 @@
     "process": "思考过程",
     "completed": "已完成 · {count} 步",
     "steps": "步"
+  },
+  "tasks": {
+    "toggle": "任务面板",
+    "loading_inline": "任务同步中",
+    "empty_inline": "暂无任务"
   }
 }

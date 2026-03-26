@@ -103,19 +103,19 @@ function handleSubmit(e?: Event) {
 </script>
 
 <template>
-  <div class="flex flex-col items-center justify-center w-full max-w-3xl mx-auto px-4" :class="{ 'h-full': !minimal }">
+  <div class="mx-auto flex w-full flex-col items-center justify-center px-4" :class="[minimal ? 'max-w-[46rem]' : 'max-w-[42rem]', { 'h-full': !minimal }]">
     <!-- Centered prominent text in serif -->
-    <h1 v-if="!minimal" class="theme-text-primary mb-12 font-serif text-4xl font-medium tracking-wide md:text-5xl lg:text-6xl">
+    <h1 v-if="!minimal" class="theme-text-primary mb-10 font-serif text-3xl font-medium tracking-wide md:text-[2.75rem] lg:text-[3.35rem]">
       {{ $t('landing.hero_title') }}
     </h1>
 
     <!-- Image previews -->
-    <div v-if="pendingImages.length > 0 || pendingFiles.length > 0" class="w-full max-w-2xl mb-2 flex flex-wrap gap-2 px-2">
+    <div v-if="pendingImages.length > 0 || pendingFiles.length > 0" class="mb-2 flex w-full max-w-[40rem] flex-wrap gap-2 px-2">
       <!-- Image thumbnails -->
       <div
         v-for="(src, idx) in pendingImages"
         :key="'img-' + idx"
-        class="theme-card relative group h-16 w-16 flex-shrink-0 overflow-hidden rounded-xl"
+        class="theme-card relative group h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl"
       >
         <img :src="src" class="w-full h-full object-cover" alt="attached image" />
         <button
@@ -130,7 +130,7 @@ function handleSubmit(e?: Event) {
       <div
         v-for="(file, idx) in pendingFiles"
         :key="'file-' + idx"
-        class="theme-card-soft relative group flex h-16 w-auto min-w-16 flex-shrink-0 items-center gap-2 overflow-hidden rounded-xl px-3"
+        class="theme-card-soft relative group flex h-14 w-auto min-w-14 flex-shrink-0 items-center gap-2 overflow-hidden rounded-xl px-3"
       >
         <component :is="getFileIcon(file.type)" :size="20" class="theme-text-muted" />
         <div class="flex flex-col overflow-hidden">
@@ -148,7 +148,7 @@ function handleSubmit(e?: Event) {
 
     <!-- Floating Input Box -->
     <div
-      class="theme-input-shell relative flex w-full max-w-2xl items-center rounded-3xl p-2 transition-all duration-300"
+      class="theme-input-shell relative flex w-full max-w-[40rem] items-center rounded-[1.6rem] p-1.5 transition-all duration-300"
       :class="(pendingImages.length > 0 || pendingFiles.length > 0) ? 'rounded-t-xl' : ''"
     >
       <!-- Hidden file input -->
@@ -164,10 +164,10 @@ function handleSubmit(e?: Event) {
       <button
         @click="openFilePicker"
         :title="$t('input.attach_file')"
-        class="relative ml-1 rounded-full p-3 transition-colors theme-text-muted hover:bg-[var(--surface-soft)] hover:text-[color:var(--text-primary)]"
+        class="theme-text-muted relative ml-0.5 rounded-full p-2.5 transition-colors hover:bg-[var(--surface-soft)] hover:text-[color:var(--text-primary)]"
         :class="(pendingImages.length > 0 || pendingFiles.length > 0) ? 'text-blue-500' : ''"
       >
-        <Plus :size="22" stroke-width="2" />
+        <Plus :size="18" stroke-width="2" />
         <span
           v-if="pendingImages.length > 0 || pendingFiles.length > 0"
           class="absolute -top-0.5 -right-0.5 w-4 h-4 bg-blue-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center"
@@ -179,27 +179,27 @@ function handleSubmit(e?: Event) {
         @keydown.enter="handleSubmit"
         @paste="onPaste"
         type="text"
-        class="theme-text-primary flex-1 border-none bg-transparent px-4 py-3 font-sans text-lg outline-none placeholder:text-[color:var(--text-muted)]"
+        class="theme-text-primary flex-1 border-none bg-transparent px-3.5 py-2.5 font-sans text-[15px] outline-none placeholder:text-[color:var(--text-muted)]"
         :placeholder="$t('landing.input_placeholder')"
       />
 
       <button
         @click="handleSubmit"
-        class="p-3 rounded-2xl transition-colors min-w-[48px] flex items-center justify-center mr-1"
+        class="mr-0.5 flex h-10 w-10 items-center justify-center rounded-[1rem] transition-colors"
         :class="(query.trim() || pendingImages.length > 0 || pendingFiles.length > 0) ? 'theme-button-strong' : 'theme-button-soft'"
       >
-        <ArrowUp :size="20" stroke-width="3" />
+        <ArrowUp :size="17" stroke-width="2.6" />
       </button>
     </div>
 
     <!-- Suggestion Cards -->
-    <div v-if="!minimal" class="flex gap-4 mt-8 w-full max-w-2xl px-2">
-      <button class="theme-pill flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-all">
-        <FileText :size="16" class="text-orange-400" />
+    <div v-if="!minimal" class="mt-6 flex w-full max-w-[40rem] gap-3 px-2">
+      <button class="theme-pill flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium transition-all">
+        <FileText :size="15" class="text-orange-400" />
         {{ $t('landing.suggest_ppt') }}
       </button>
-      <button class="theme-pill flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-all">
-        <Globe :size="16" class="text-blue-400" />
+      <button class="theme-pill flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium transition-all">
+        <Globe :size="15" class="text-blue-400" />
         {{ $t('landing.suggest_analyze') }}
       </button>
     </div>

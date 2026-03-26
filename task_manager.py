@@ -203,6 +203,24 @@ class TaskManager:
 
         return "\n".join(lines)
 
+    def list_tasks(self) -> list[dict]:
+        """Return all tasks as structured data sorted by numeric task ID."""
+        tasks: list[dict] = []
+
+        def _task_sort_key(path: Path) -> int:
+            try:
+                return int(path.stem.split("_")[1])
+            except (IndexError, ValueError):
+                return 0
+
+        for f in sorted(self.dir.glob("task_*.json"), key=_task_sort_key):
+            try:
+                tasks.append(json.loads(f.read_text(encoding="utf-8")))
+            except json.JSONDecodeError:
+                continue
+
+        return tasks
+
     def delete(self, task_id: int) -> str:
         """
         Delete a task.

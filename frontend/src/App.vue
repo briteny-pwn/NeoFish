@@ -6,12 +6,16 @@ import Sidebar from './components/Sidebar.vue'
 import MainInput from './components/MainInput.vue'
 import BrowserView from './components/BrowserView.vue'
 import ThinkingChain from './components/ThinkingChain.vue'
+import TaskSidebar from './components/TaskSidebar.vue'
 import { useChatHistory } from './composables/useChatHistory'
+import { useTasks } from './composables/useTasks'
 import { useDebugMode } from './composables/useDebugMode'
 import { useThemeMode } from './composables/useThemeMode'
+import { extractSessionPreview } from './utils/sessionPreview'
 
 const { t } = useI18n()
 const { sessions, activeChatId, loadSessions, createNewChat, refreshSession } = useChatHistory()
+const { tasks, loadTasks, isLoading: tasksLoading } = useTasks()
 const { debugMode } = useDebugMode()
 useThemeMode()
 
@@ -23,6 +27,7 @@ const isTaskRunning = ref(false)
 const browserFrame = ref('')
 const browserUrl = ref('')
 const browserViewport = ref({ width: 1280, height: 800 })
+let taskPollTimer: number | null = null
 
 function connectWs(sessionId: string) {
   if (ws.value) {
@@ -35,6 +40,7 @@ function connectWs(sessionId: string) {
 
   socket.onopen = () => {
     isConnected.value = true
+    void loadTasks()
   }
 
   socket.onmessage = (event) => {
@@ -69,6 +75,9 @@ function connectWs(sessionId: string) {
       isTaskRunning.value = false
     }
     pushMessage(data)
+    if (shouldRefreshTasks(data)) {
+      void loadTasks()
+    }
   }
 
   socket.onclose = () => {
@@ -141,6 +150,13 @@ function getToolDisplayName(toolName: string): string {
   const key = `tools.${toolName}`
   const translated = t(key)
   return translated === key ? t('tools.default') : translated
+}
+
+function shouldRefreshTasks(data: any): boolean {
+  const toolName = data?.params?.tool
+  return data?.message_key === 'common.agent_starting' ||
+    data?.message_key === 'common.task_completed' ||
+    (typeof toolName === 'string' && toolName.startsWith('task_'))
 }
 
 function translateMessageFallback(msg: string): { message_key?: string; params?: Record<string, any> } {
@@ -264,11 +280,30 @@ const processedMessages = computed(() => {
   return result
 })
 
+function buildSessionPreview(items: ReadonlyArray<any>): string {
+  return extractSessionPreview(items, {
+    resolveText: (msg) => {
+      if (msg.message_key === 'common.task_completed') {
+        return msg.params?.report || ''
+      }
+      if (msg.message_key) {
+        return t(msg.message_key, msg.params || {})
+      }
+      return msg.message || msg.content || ''
+    },
+  })
+}
+
+function refreshActiveSessionPreview() {
+  if (!activeChatId.value) return
+  const preview = buildSessionPreview(messages.value)
+  refreshSession(activeChatId.value, { preview })
+}
+
 function pushMessage(data: any) {
   messages.value.push(data)
   if (activeChatId.value && (data.type === 'info' || data.type === 'user')) {
-    const preview = (data.message || '').slice(0, 80)
-    refreshSession(activeChatId.value, { preview })
+    refreshActiveSessionPreview()
   }
 }
 
@@ -281,6 +316,7 @@ async function switchToSession(id: string) {
   hasStarted.value = false
   isInTakeover.value = false
   browserFrame.value = ''
+  await loadTasks()
 
   // Load existing messages from backend
   const hist = await loadMessages(id)
@@ -321,6 +357,7 @@ async function switchToSession(id: string) {
         images: m.images ?? [],
       }
     })
+    refreshActiveSessionPreview()
   }
 
   connectWs(id)
@@ -412,6 +449,10 @@ function onBrowserNavigate(payload: { url: string }) {
 
 // ─── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(async () => {
+  await loadTasks()
+  taskPollTimer = window.setInterval(() => {
+    void loadTasks()
+  }, 3000)
   await loadSessions()
   if (sessions.value.length > 0 && sessions.value[0]) {
     await switchToSession(sessions.value[0].id)
@@ -425,6 +466,9 @@ onUnmounted(() => {
   if (ws.value) {
     ws.value.onclose = null
     ws.value.close()
+  }
+  if (taskPollTimer !== null) {
+    window.clearInterval(taskPollTimer)
   }
 })
 </script>
@@ -457,6 +501,15 @@ onUnmounted(() => {
           >{{ $t('common.proactive_takeover') }}</button>
         </div>
       </header>
+
+      <div class="pointer-events-none absolute bottom-6 right-0 top-24 z-20 hidden min-[1280px]:block">
+        <div class="pointer-events-auto h-full">
+          <TaskSidebar
+            :tasks="tasks"
+            :loading="tasksLoading"
+          />
+        </div>
+      </div>
       
       <div v-if="!hasStarted" class="flex-1 overflow-hidden transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] opacity-100 translate-y-0">
         <MainInput @submit="handleUserSubmit" />
