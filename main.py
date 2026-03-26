@@ -4,7 +4,6 @@ load_dotenv()
 
 import json
 import uuid
-import asyncio
 from datetime import datetime
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -17,7 +16,6 @@ import os
 from playwright_manager import PlaywrightManager
 from agent import run_agent_loop
 from platforms.web import WebAdapter
-from agent_task_manager import task_manager
 
 pm = PlaywrightManager()
 
@@ -145,25 +143,6 @@ def get_messages(session_id: str):
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     return sessions[session_id]["messages"]
-
-
-@app.get("/chats/{session_id}/task_status")
-def get_task_status(session_id: str):
-    status = task_manager.get_task_status(session_id)
-    if status:
-        return {"session_id": session_id, "status": status.value}
-    return {"session_id": session_id, "status": None}
-
-
-@app.post("/chats/{session_id}/stop_task")
-async def stop_task(session_id: str):
-    success = await task_manager.stop_task(session_id)
-    return {"session_id": session_id, "stopped": success}
-
-
-@app.get("/tasks/stats")
-def get_task_stats():
-    return task_manager.get_stats()
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────
