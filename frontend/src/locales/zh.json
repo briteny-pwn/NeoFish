@@ -86,6 +86,15 @@
     "switch_tab": "正在切换标签页",
     "close_tab": "正在关闭标签页",
     "finish_task": "完成任务",
+    "read_file": "正在读取文件",
+    "write_file": "正在写入文件",
+    "edit_file": "正在编辑文件",
+    "send_file": "正在发送文件",
+    "run_bash": "正在运行指令",
+    "background_run": "正在启动后台任务",
+    "check_background": "正在检查后台任务",
+    "send_screenshot": "正在截图",
+    "compact": "正在压缩上下文",
     "default": "正在执行操作"
   },
   "status": {
